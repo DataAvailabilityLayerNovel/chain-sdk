@@ -182,25 +182,19 @@ func (nm *nodeManager) run() error {
 		return err
 	}
 
-	if err := nm.startDASubmitter(); err != nil {
-		return err
-	}
-
 	if err := nm.waitForChainSync(); err != nil {
 		return err
 	}
 
 	log.Printf("Cosmos/WASM stack is running")
 	log.Printf("- celestia DA endpoint used by nodes: %s", nm.cfg.daAddress)
-	log.Printf("- celestia DA submit endpoint: %s", nm.cfg.daSubmitAddress)
 	log.Printf("- da namespace used by nodes: %s", nm.cfg.daNamespace)
-	log.Printf("- da upload mode: dual (engram + celestia)")
-	log.Printf("- da upload namespace: %s", nm.cfg.uploadNamespace)
+	log.Printf("- da submission path: evnode runtime (aggregator)")
 	log.Printf("- sequencer rpc: http://127.0.0.1:%d", nm.nodes[0].rpcPort)
 	log.Printf("- full node rpc: http://127.0.0.1:%d", nm.nodes[1].rpcPort)
 	log.Printf("- sequencer execution gRPC: http://127.0.0.1:%d", nm.nodes[0].execGRPCPort)
 	log.Printf("- full execution gRPC: http://127.0.0.1:%d", nm.nodes[1].execGRPCPort)
-	log.Printf("DA submission can be observed in logs containing 'submit'/'da'")
+	log.Printf("DA submission can be observed in evcosmos logs containing 'da_submitter'/'da_height'")
 	nm.logLatestBlobHeightHint()
 
 	return nm.monitorProcesses()
@@ -439,41 +433,6 @@ func (nm *nodeManager) startFullNode() error {
 	return nil
 }
 
-func (nm *nodeManager) startDASubmitter() error {
-	argsEngram := []string{
-		"run", "./tools/cosmos-da-submit",
-		"--namespace", nm.cfg.uploadNamespace,
-		"--chain-log-file", nm.cfg.chainLogFile,
-		"--interval", nm.cfg.submitInterval.String(),
-		"--chain", "cosmos-wasm",
-		"--submit-api", nm.cfg.submitAPI,
-		"--api-type", nm.cfg.submitAPIType,
-	}
-	cmdEngram := exec.CommandContext(nm.ctx, "go", argsEngram...)
-	cmdEngram.Dir = nm.projectRoot
-	if err := nm.startProcess("cosmos-da-submit-engram", cmdEngram); err != nil {
-		return fmt.Errorf("start cosmos-da-submit-engram: %w", err)
-	}
-
-	argsCelestia := []string{
-		"run", "./tools/cosmos-da-submit",
-		"--namespace", nm.cfg.daNamespace,
-		"--chain-log-file", nm.cfg.chainLogFile,
-		"--interval", nm.cfg.submitInterval.String(),
-		"--chain", "cosmos-wasm",
-		"--da-url", nm.cfg.daSubmitAddress,
-		"--da-fallback-url", nm.cfg.daAddress,
-		"--auth-token", nm.cfg.daAuthToken,
-	}
-	cmdCelestia := exec.CommandContext(nm.ctx, "go", argsCelestia...)
-	cmdCelestia.Dir = nm.projectRoot
-	if err := nm.startProcess("cosmos-da-submit-celestia", cmdCelestia); err != nil {
-		return fmt.Errorf("start cosmos-da-submit-celestia: %w", err)
-	}
-
-	return nil
-}
-
 func (nm *nodeManager) waitForChainSync() error {
 	seqURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[0].rpcPort)
 	fullURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[1].rpcPort)
@@ -549,13 +508,6 @@ func (nm *nodeManager) validateDAConfig() error {
 
 	if nm.cfg.daNamespace == "" {
 		return errors.New("DA namespace for nodes is empty")
-	}
-
-	if nm.cfg.uploadNamespace == "" {
-		return errors.New("DA upload namespace is empty")
-	}
-	if nm.cfg.submitAPI == "" {
-		return errors.New("engram submit endpoint is empty: set COSMOS_DA_SUBMIT_API or ENGRAM_API_BASE")
 	}
 
 	return nil

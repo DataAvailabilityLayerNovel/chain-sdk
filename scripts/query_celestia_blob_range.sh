@@ -10,12 +10,67 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
 fi
 
 DEFAULT_NAMESPACE="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA="
-NAMESPACE="${DA_NAMESPACE_B64:-$DEFAULT_NAMESPACE}"
+NAMESPACE=""
+if [[ -n "${DA_NAMESPACE:-}" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    NAMESPACE="$(python3 - <<'PY' "${DA_NAMESPACE}"
+import base64
+import hashlib
+import sys
+
+value = sys.argv[1]
+h = hashlib.sha256(value.encode()).digest()[:10]
+raw = bytes([0]) + bytes(18) + h
+print(base64.b64encode(raw).decode())
+PY
+)"
+  fi
+fi
+NAMESPACE="${NAMESPACE:-${DA_NAMESPACE_B64:-}}"
+NAMESPACE="${NAMESPACE:-$DEFAULT_NAMESPACE}"
 FROM_HEIGHT=""
 TO_HEIGHT=""
 
-CELESTIA_RPC="${CELESTIA_BRIDGE_RPC:-http://131.153.224.169:26758}"
+CELESTIA_RPC="${CELESTIA_BRIDGE_RPC:-${DA_BRIDGE_RPC:-${DA_RPC:-http://131.153.224.169:26758}}}"
 AUTH_TOKEN="${DA_AUTH_TOKEN:-}"
+
+normalize_namespace() {
+  local input="$1"
+
+  if [[ -z "$input" ]]; then
+    echo "$input"
+    return 0
+  fi
+
+  if [[ "$input" =~ ^(0x)?[0-9a-fA-F]+$ ]]; then
+    local hex="$input"
+    hex="${hex#0x}"
+    hex="${hex#0X}"
+
+    if (( ${#hex} % 2 != 0 )); then
+      echo "[err] invalid hex namespace length (must be even): $input" >&2
+      exit 1
+    fi
+
+    python3 - <<'PY' "$hex"
+import base64
+import binascii
+import sys
+
+h = sys.argv[1]
+try:
+    raw = binascii.unhexlify(h)
+except binascii.Error as e:
+    print(f"[err] invalid hex namespace: {e}", file=sys.stderr)
+    sys.exit(1)
+
+print(base64.b64encode(raw).decode())
+PY
+    return 0
+  fi
+
+  echo "$input"
+}
 
 usage() {
   cat <<'EOF'
@@ -38,19 +93,46 @@ require_cmd() {
 
 decode_blob_data() {
   local b64_data="$1"
-  local decoded
+  python3 - <<'PY' "$b64_data"
+import base64
+import hashlib
+import json
+import sys
 
-  decoded="$(printf '%s' "$b64_data" | base64 -d 2>/dev/null || true)"
-  if [[ -z "$decoded" ]]; then
-    echo "[err] cannot decode base64 data"
-    return 1
-  fi
+b64 = sys.argv[1]
 
-  if printf '%s' "$decoded" | jq -e . >/dev/null 2>&1; then
-    printf '%s' "$decoded" | jq .
-  else
-    printf '%s\n' "$decoded"
-  fi
+try:
+    raw = base64.b64decode(b64, validate=False)
+except Exception:
+    print("[err] cannot decode base64 data")
+    sys.exit(1)
+
+if not raw:
+    print("[err] cannot decode base64 data")
+    sys.exit(1)
+
+text = None
+try:
+    text = raw.decode("utf-8")
+except UnicodeDecodeError:
+    pass
+
+if text is not None:
+    stripped = text.strip()
+    if stripped:
+        try:
+            obj = json.loads(text)
+            print(json.dumps(obj, indent=2, ensure_ascii=False))
+            sys.exit(0)
+        except Exception:
+            printable_ratio = sum((ch.isprintable() or ch in "\n\r\t") for ch in text) / max(len(text), 1)
+            if printable_ratio >= 0.95:
+                print(text)
+                sys.exit(0)
+
+print(f"[binary] bytes={len(raw)} sha256={hashlib.sha256(raw).hexdigest()}")
+print(f"[binary] head_hex={raw[:64].hex()}")
+PY
 }
 
 parse_args() {
@@ -144,18 +226,21 @@ query_height() {
     local b64_data
     b64_data="$(echo "$response" | jq -r ".result[$idx].data")"
     echo "  - blob[$idx] decoded:"
-    decode_blob_data "$b64_data" | sed 's/^/    /'
+    decode_blob_data "$b64_data" | LC_ALL=C sed 's/^/    /'
   done
 }
 
 main() {
   require_cmd jq
   require_cmd curl
+  require_cmd python3
   parse_args "$@"
 
+  NAMESPACE="$(normalize_namespace "$NAMESPACE")"
+
   if [[ -z "$AUTH_TOKEN" ]]; then
-    echo "[err] CELESTIA_AUTH_TOKEN is required"
-    echo "[hint] export CELESTIA_AUTH_TOKEN=... (or set in .env)"
+    echo "[err] DA_AUTH_TOKEN is required"
+    echo "[hint] export DA_AUTH_TOKEN=... (or set in .env)"
     exit 1
   fi
 

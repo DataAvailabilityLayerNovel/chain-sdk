@@ -4,7 +4,8 @@ Tài liệu này chỉ giữ **trạng thái hiện tại** và các lệnh có 
 
 ## 1) Những gì đang chạy được
 
-- Chạy `evcosmos` full stack qua runner: sequencer + fullnode + `cosmos-exec-grpc` + DA submit sidecar.
+- Chạy `evcosmos` full stack qua runner: sequencer + fullnode + `cosmos-exec-grpc`.
+- DA submit đi trực tiếp qua evnode runtime (aggregator), không dùng sidecar `cosmos-da-submit`.
 - Health endpoint của 2 node.
 - RPC đọc block/tx/state qua script `scripts/contracts/wasm-rpc.sh` (backend là `tools/evnode-rpc`).
 
@@ -15,13 +16,14 @@ Yêu cầu các biến sau trong `.env`:
 - `DA_BRIDGE_RPC` hoặc `DA_RPC`
 - `DA_AUTH_TOKEN`
 - `DA_NAMESPACE`
-- `COSMOS_DA_SUBMIT_API` hoặc `ENGRAM_API_BASE`
-- `ENGRAM_NAMESPACE`
 
-Runner hiện submit song song lên:
+Khuyến nghị:
 
-- Engram API (`COSMOS_DA_SUBMIT_API` / `ENGRAM_API_BASE`)
-- Celestia trực tiếp qua `DA_BRIDGE_RPC` (fallback `DA_RPC`)
+- Không set `DA_NAMESPACE_B64` theo kiểu cũ (right-pad text như `rollup`) vì có thể lệch namespace runtime.
+- Các script blob/watch hiện tự derive namespace từ `DA_NAMESPACE` theo đúng logic runtime evnode (v0 namespace từ `sha256(DA_NAMESPACE)`), nên chỉ cần giữ `DA_NAMESPACE`.
+- Nếu vẫn muốn set tay `DA_NAMESPACE_B64`, phải dùng đúng giá trị runtime-derived; sai giá trị sẽ làm watch/query trả rỗng dù chain vẫn đang submit.
+
+Runner hiện để chính evnode submit trực tiếp lên Celestia qua `DA_BRIDGE_RPC` (fallback `DA_RPC`).
 
 Lưu ý: endpoint submit Celestia cần hỗ trợ blob JSON-RPC methods (`blob.*`), thường là bridge RPC.
 
@@ -101,27 +103,25 @@ curl http://127.0.0.1:48331/health/live
 
 Kỳ vọng: cả 2 trả về `OK`.
 
-Trong log runner, kỳ vọng có dòng submit sidecar:
+Trong log runner, kỳ vọng có log submit từ evnode:
 
 ```text
-[cosmos-da-submit] [ok][da-submitter] engram_submit ... status=200
-[runner][blob-height] blob_height=<N> source=...
+[evcosmos-sequencer] ... component=da_submitter ...
+[runner][blob-height] blob_height=<N> source=evcosmos-sequencer
 ```
 
-Với Celestia direct submit, cần kiểm tra thêm namespace thực tế của submitter:
+Để kiểm tra nhanh DA height mới nhất từ evnode:
 
 ```bash
-grep -E 'cosmos-da-submit-celestia.*rpc mode|cosmos-da-submit-celestia.*da_height=' .logs/cosmos-wasm-chain.log | tail -n 20
+grep -E 'evcosmos-sequencer.*da_height=|\[runner\]\[blob-height\]' .logs/cosmos-wasm-chain.log | tail -n 20
 ```
 
 Kỳ vọng có dạng:
 
 ```text
-[cosmos-da-submit-celestia] [run][da-submitter] rpc mode ... namespace=...726f6c6c7570 ...
-[cosmos-da-submit-celestia] [ok][da-submitter] seq=... da_height=...
+[evcosmos-sequencer] ... da_height=...
+[runner][blob-height] blob_height=<N> source=evcosmos-sequencer
 ```
-
-Nếu thấy namespace kết thúc kiểu `...45fb8b...` thì đó là namespace hash của chuỗi `rollup`, query bằng namespace mặc định sẽ ra `result:null`. Khi đó cần restart runner với code mới để Celestia submitter dùng đúng `DA_NAMESPACE`.
 
 `blob_height=<N>` là giá trị để query blob trên Celestia.
 
@@ -180,16 +180,11 @@ Luồng resolve height mặc định:
 1. Đọc `blob_height=<N>` mới nhất từ `CHAIN_LOG_FILE` (mặc định `.logs/cosmos-wasm-chain.log`)
 2. Nếu chưa có thì fallback sang `latest-block` RPC (`data_da_height/header_da_height`)
 
-Lưu ý quan trọng với `COSMOS_DA_UPLOAD_MODE=engram`:
-
-- Log `engram_submit ... status=200` chỉ xác nhận API Engram nhận request.
-- Log này **không** trả trực tiếp `da_height` trên Celestia, nên không thể dùng `chain_height` để query `blob.GetAll`.
-- Nếu cần query trực tiếp Celestia theo height, cần có nguồn trả về `da_height` thật (hoặc chạy mode submit trực tiếp Celestia).
-
 Lưu ý namespace:
 
-- Height chỉ query được khi namespace query đúng với namespace đã submit ở log `cosmos-da-submit-celestia`.
-- Ưu tiên dùng `blob_height` được emit từ `source=cosmos-da-submit-celestia` trong cùng run hiện tại.
+- Height chỉ query được khi namespace query đúng với namespace mà evnode đang dùng (`DA_NAMESPACE`).
+- Ưu tiên dùng `blob_height` được emit trong log hiện tại của runner/evnode.
+- `watch_celestia_latest_blobs.sh` chỉ in khi height đó có blob thuộc namespace đang query; nếu namespace sai thì sẽ im lặng.
 
 Các mẫu:
 
@@ -221,10 +216,24 @@ Các mẫu:
 
 Config endpoint RPC:
 
-- `EVNODE_RPC_URL` (ưu tiên)
-- hoặc `WASM_RPC_URL`
-- hoặc `NODE`
-- mặc định: `http://127.0.0.1:38331`
+- `CELESTIA_BRIDGE_RPC` (ưu tiên)
+- hoặc `DA_BRIDGE_RPC`
+- hoặc `DA_RPC`
+- mặc định: `http://131.153.224.169:26758`
+
+Debug nhanh khi watch không ra blob:
+
+```bash
+# 1) kiểm tra chain có đang submit DA không
+grep -E 'evcosmos-sequencer.*da_height=' .logs/cosmos-wasm-chain.log | tail -n 10
+
+# 2) chạy watch hiện lỗi RPC
+./scripts/watch_celestia_latest_blobs.sh --show-errors
+
+# 3) smoke test 1 height vừa submit
+H=$(grep -E 'evcosmos-sequencer.*da_height=' .logs/cosmos-wasm-chain.log | grep -Eo 'da_height=[0-9]+' | tail -n 1 | cut -d= -f2)
+./scripts/watch_celestia_latest_blobs.sh --once --start-height "$H" --show-errors
+```
 
 ## 6) Deploy/submit/execute/query contract (full-stack)
 
@@ -252,30 +261,36 @@ Các lệnh chạy ngay:
 
 Mẫu đầy đủ đã test: submit tx rồi query tx đó
 
+Lưu ý khi chạy trên `zsh`:
+
+- Nếu paste cả block có dòng comment bắt đầu bằng `#`, `zsh` có thể báo `command not found: #` (và lỗi phụ như `unknown file attribute: b`).
+- Cách 1: bật comment mode trước khi paste: `setopt interactivecomments`
+- Cách 2: dùng block không comment bên dưới.
+
 ```bash
-# deploy contract
 ./scripts/contracts/wasm-contract.sh deploy
 
-# lấy info deploy
 source /tmp/ev-node-wasm/last-deploy.env
 
-# lấy sender mặc định
 SENDER=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx default-sender)
 
-# build raw execute tx (base64)
 TX_BASE64=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx execute \
 	--sender "$SENDER" \
 	--contract "$CONTRACT_ADDR" \
 	--msg '{"transfer":{"recipient":"'"$CONTRACT_ADDR"'","amount":"1"}}' \
 	--out base64)
 
-# submit raw tx
 SUBMIT_JSON=$(./scripts/contracts/wasm-contract.sh submit --tx-base64 "$TX_BASE64")
 echo "$SUBMIT_JSON"
 
-# query tx vừa submit bằng API block/tx
 TX_HASH=$(echo "$SUBMIT_JSON" | jq -r '.hash')
 ./scripts/contracts/wasm-rpc.sh tx --hash "$TX_HASH"
+```
+
+Nếu vừa submit mà `tx --hash` trả `found:false`, thường là tx chưa được index hoặc node chưa chạy đúng RPC. Retry nhanh:
+
+```bash
+for i in {1..10}; do ./scripts/contracts/wasm-rpc.sh tx --hash "$TX_HASH" && break; sleep 2; done
 ```
 
 Ví dụ hash thực tế từ lần test gần nhất:
