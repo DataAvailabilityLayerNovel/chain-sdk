@@ -53,25 +53,29 @@ type EngramSubmitRequest struct {
 
 func main() {
 	var (
-		daURL        string
-		authToken    string
-		namespace    string
-		chainLogFile string
-		interval     time.Duration
-		chainName    string
-		gasPrice     float64
-		submitAPI    string
-		apiType      string
-		httpClient   = &http.Client{Timeout: 12 * time.Second}
+		daURL         string
+		daFallbackURL string
+		authToken     string
+		namespace     string
+		chainLogFile  string
+		interval      time.Duration
+		submitTimeout time.Duration
+		chainName     string
+		gasPrice      float64
+		submitAPI     string
+		apiType       string
+		httpClient    = &http.Client{Timeout: 12 * time.Second}
 	)
 
 	flag.StringVar(&daURL, "da-url", "", "DA bridge RPC URL")
+	flag.StringVar(&daFallbackURL, "da-fallback-url", "", "Fallback DA RPC URL for retry when primary fails")
 	flag.StringVar(&authToken, "auth-token", "", "DA auth token")
 	flag.StringVar(&submitAPI, "submit-api", "", "HTTP submit API endpoint")
 	flag.StringVar(&apiType, "api-type", "simple", "API type: 'simple' (simple blob) or 'engram' (Engram format)")
 	flag.StringVar(&namespace, "namespace", "rollup", "DA namespace (hex or string)")
 	flag.StringVar(&chainLogFile, "chain-log-file", ".logs/cosmos-chain.log", "path to cosmos chain log file to extract real chain data")
 	flag.DurationVar(&interval, "interval", 8*time.Second, "submit interval")
+	flag.DurationVar(&submitTimeout, "submit-timeout", 20*time.Second, "timeout for a single DA blob submit attempt")
 	flag.StringVar(&chainName, "chain", "cosmos-exec", "chain name label in submitted payload")
 	flag.Float64Var(&gasPrice, "gas-price", 0, "DA gas price")
 	flag.Parse()
@@ -85,9 +89,10 @@ func main() {
 	defer cancel()
 
 	var (
-		client *dajsonrpc.Client
-		ns     libshare.Namespace
-		err    error
+		client         *dajsonrpc.Client
+		fallbackClient *dajsonrpc.Client
+		ns             libshare.Namespace
+		err            error
 	)
 
 	if submitAPI == "" {
@@ -104,6 +109,16 @@ func main() {
 		}
 		defer client.Close()
 		fmt.Printf("[run][da-submitter] rpc mode da_url=%s namespace=%s interval=%s\n", daURL, ns.String(), interval)
+
+		if strings.TrimSpace(daFallbackURL) != "" && strings.TrimSpace(daFallbackURL) != strings.TrimSpace(daURL) {
+			fallbackClient, err = dajsonrpc.NewClient(ctx, daFallbackURL, authToken, "")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[wrn][da-submitter] connect fallback DA client failed: %v\n", err)
+			} else {
+				defer fallbackClient.Close()
+				fmt.Printf("[run][da-submitter] rpc fallback enabled da_fallback_url=%s\n", daFallbackURL)
+			}
+		}
 	} else {
 		if apiType == "engram" {
 			fmt.Printf("[run][da-submitter] engram mode submit_api=%s namespace=%s interval=%s\n", submitAPI, namespace, interval)
@@ -125,7 +140,7 @@ func main() {
 				err = submitOnceHTTP(ctx, httpClient, submitAPI, namespace, chainName, seq)
 			}
 		} else {
-			err = submitOnce(ctx, client, ns, chainName, seq, gasPrice)
+			err = submitOnceWithFallback(ctx, client, fallbackClient, ns, chainName, seq, gasPrice, submitTimeout)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[err][da-submitter] submit failed seq=%d err=%v\n", seq, err)
@@ -139,6 +154,61 @@ func main() {
 		case <-ticker.C:
 		}
 	}
+}
+
+func submitOnceWithFallback(
+	ctx context.Context,
+	primary *dajsonrpc.Client,
+	fallback *dajsonrpc.Client,
+	ns libshare.Namespace,
+	chainName string,
+	seq uint64,
+	gasPrice float64,
+	timeout time.Duration,
+) error {
+	err := submitOnce(ctx, primary, ns, chainName, seq, gasPrice, timeout)
+	if err == nil {
+		return nil
+	}
+
+	if fallback == nil || !shouldRetryOnFallback(err) {
+		return err
+	}
+
+	fmt.Printf("[wrn][da-submitter] primary submit failed seq=%d err=%v; retrying fallback RPC\n", seq, err)
+	fallbackErr := submitOnce(ctx, fallback, ns, chainName, seq, gasPrice, timeout)
+	if fallbackErr == nil {
+		fmt.Printf("[ok][da-submitter] fallback submit succeeded seq=%d\n", seq)
+		return nil
+	}
+
+	return fmt.Errorf("primary: %v; fallback: %w", err, fallbackErr)
+}
+
+func shouldRetryOnFallback(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	patterns := []string{
+		"method not found",
+		"-32601",
+		"context deadline exceeded",
+		"connection refused",
+		"no route to host",
+		"transport: error while dialing",
+		"sendrequest failed",
+		"rpc client error",
+	}
+
+	for _, p := range patterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+
+	return false
 }
 
 type submitAPIRequest struct {
@@ -333,7 +403,15 @@ func parseHeightFromLine(line string) int64 {
 	return 0
 }
 
-func submitOnce(ctx context.Context, client *dajsonrpc.Client, ns libshare.Namespace, chainName string, seq uint64, gasPrice float64) error {
+func submitOnce(
+	ctx context.Context,
+	client *dajsonrpc.Client,
+	ns libshare.Namespace,
+	chainName string,
+	seq uint64,
+	gasPrice float64,
+	timeout time.Duration,
+) error {
 	payload := submitPayload{
 		Chain:     chainName,
 		Sequence:  seq,
@@ -356,7 +434,11 @@ func submitOnce(ctx context.Context, client *dajsonrpc.Client, ns libshare.Names
 		opts.IsGasPriceSet = true
 	}
 
-	submitCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+
+	submitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	daHeight, err := client.Blob.Submit(submitCtx, []*dajsonrpc.Blob{blob}, opts)
@@ -373,8 +455,37 @@ func parseNamespace(raw string) (libshare.Namespace, error) {
 		raw = "rollup"
 	}
 
-	if nsHex, err := datypes.ParseHexNamespace(raw); err == nil {
-		return libshare.NewNamespaceFromBytes(nsHex.Bytes())
+	raw = strings.TrimSpace(raw)
+
+	if decodedHex, err := hex.DecodeString(strings.TrimPrefix(raw, "0x")); err == nil && len(decodedHex) > 0 {
+		if len(decodedHex) > datypes.NamespaceSize {
+			return libshare.Namespace{}, fmt.Errorf("hex namespace too long: got %d bytes, max %d", len(decodedHex), datypes.NamespaceSize)
+		}
+
+		if len(decodedHex) < datypes.NamespaceSize {
+			padded := make([]byte, datypes.NamespaceSize)
+			copy(padded[datypes.NamespaceSize-len(decodedHex):], decodedHex)
+			decodedHex = padded
+		}
+
+		ns, err := libshare.NewNamespaceFromBytes(decodedHex)
+		if err == nil {
+			return ns, nil
+		}
+
+		if nsHex, parseErr := datypes.ParseHexNamespace(raw); parseErr == nil {
+			return libshare.NewNamespaceFromBytes(nsHex.Bytes())
+		}
+		return libshare.Namespace{}, fmt.Errorf("invalid hex namespace: %w", err)
+	}
+
+	textBytes := []byte(raw)
+	if len(textBytes) > 0 && len(textBytes) <= datypes.NamespaceSize {
+		padded := make([]byte, datypes.NamespaceSize)
+		copy(padded[datypes.NamespaceSize-len(textBytes):], textBytes)
+		if ns, err := libshare.NewNamespaceFromBytes(padded); err == nil {
+			return ns, nil
+		}
 	}
 
 	ns := datypes.NamespaceFromString(raw)

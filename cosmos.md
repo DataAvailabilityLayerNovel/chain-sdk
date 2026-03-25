@@ -15,9 +15,15 @@ Yêu cầu các biến sau trong `.env`:
 - `DA_BRIDGE_RPC` hoặc `DA_RPC`
 - `DA_AUTH_TOKEN`
 - `DA_NAMESPACE`
-- `COSMOS_DA_UPLOAD_MODE=engram`
 - `COSMOS_DA_SUBMIT_API` hoặc `ENGRAM_API_BASE`
 - `ENGRAM_NAMESPACE`
+
+Runner hiện submit song song lên:
+
+- Engram API (`COSMOS_DA_SUBMIT_API` / `ENGRAM_API_BASE`)
+- Celestia trực tiếp qua `DA_BRIDGE_RPC` (fallback `DA_RPC`)
+
+Lưu ý: endpoint submit Celestia cần hỗ trợ blob JSON-RPC methods (`blob.*`), thường là bridge RPC.
 
 ## 3) Chạy full stack
 
@@ -29,14 +35,13 @@ Dùng khi muốn reset node data và chạy lại từ đầu:
 
 ```bash
 set -a && source .env && set +a
-export COSMOS_DA_UPLOAD_MODE=engram
 go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
 ```
 
 Mẫu 1 dòng:
 
 ```bash
-set -a && source .env && set +a && export COSMOS_DA_UPLOAD_MODE=engram && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
+set -a && source .env && set +a && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
 ```
 
 ### 3.2 Trường hợp B: chạy tiếp (resume data hiện có)
@@ -45,14 +50,13 @@ Dùng khi muốn tiếp tục từ dữ liệu đang có (không xóa `.evcosmos
 
 ```bash
 set -a && source .env && set +a
-export COSMOS_DA_UPLOAD_MODE=engram
 go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
 ```
 
 Mẫu 1 dòng:
 
 ```bash
-set -a && source .env && set +a && export COSMOS_DA_UPLOAD_MODE=engram && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
+set -a && source .env && set +a && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
 ```
 
 ### 3.3 Nếu bị báo port đang dùng
@@ -66,7 +70,6 @@ pkill -f cosmos-exec-grpc || true
 pkill -f evcosmos || true
 
 set -a && source .env && set +a
-export COSMOS_DA_UPLOAD_MODE=engram
 go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
 ```
 
@@ -102,6 +105,30 @@ Trong log runner, kỳ vọng có dòng submit sidecar:
 
 ```text
 [cosmos-da-submit] [ok][da-submitter] engram_submit ... status=200
+[runner][blob-height] blob_height=<N> source=...
+```
+
+Với Celestia direct submit, cần kiểm tra thêm namespace thực tế của submitter:
+
+```bash
+grep -E 'cosmos-da-submit-celestia.*rpc mode|cosmos-da-submit-celestia.*da_height=' .logs/cosmos-wasm-chain.log | tail -n 20
+```
+
+Kỳ vọng có dạng:
+
+```text
+[cosmos-da-submit-celestia] [run][da-submitter] rpc mode ... namespace=...726f6c6c7570 ...
+[cosmos-da-submit-celestia] [ok][da-submitter] seq=... da_height=...
+```
+
+Nếu thấy namespace kết thúc kiểu `...45fb8b...` thì đó là namespace hash của chuỗi `rollup`, query bằng namespace mặc định sẽ ra `result:null`. Khi đó cần restart runner với code mới để Celestia submitter dùng đúng `DA_NAMESPACE`.
+
+`blob_height=<N>` là giá trị để query blob trên Celestia.
+
+Bạn có thể lọc nhanh height mới nhất:
+
+```bash
+grep -E 'blob_height=' .logs/cosmos-wasm-chain.log | tail -n 1
 ```
 
 ## 5) API block/tx/state (không dùng `wasmd` standalone)
@@ -138,6 +165,49 @@ Mẫu query tx vừa submit thành công:
 
 ```bash
 ./scripts/contracts/wasm-rpc.sh tx --hash 489cff18c1e56d2a112f35086bb148de84d445049dd96744937aa60984d254cf
+```
+
+## 5.1 Query Celestia blob (tự điền height)
+
+Script:
+
+```bash
+./scripts/query_celestia_blob.sh
+```
+
+Luồng resolve height mặc định:
+
+1. Đọc `blob_height=<N>` mới nhất từ `CHAIN_LOG_FILE` (mặc định `.logs/cosmos-wasm-chain.log`)
+2. Nếu chưa có thì fallback sang `latest-block` RPC (`data_da_height/header_da_height`)
+
+Lưu ý quan trọng với `COSMOS_DA_UPLOAD_MODE=engram`:
+
+- Log `engram_submit ... status=200` chỉ xác nhận API Engram nhận request.
+- Log này **không** trả trực tiếp `da_height` trên Celestia, nên không thể dùng `chain_height` để query `blob.GetAll`.
+- Nếu cần query trực tiếp Celestia theo height, cần có nguồn trả về `da_height` thật (hoặc chạy mode submit trực tiếp Celestia).
+
+Lưu ý namespace:
+
+- Height chỉ query được khi namespace query đúng với namespace đã submit ở log `cosmos-da-submit-celestia`.
+- Ưu tiên dùng `blob_height` được emit từ `source=cosmos-da-submit-celestia` trong cùng run hiện tại.
+
+Các mẫu:
+
+```bash
+# auto (không cần truyền height)
+./scripts/query_celestia_blob.sh
+
+# theo tx hash
+./scripts/query_celestia_blob.sh --tx-hash <HEX_TX_HASH>
+
+# theo ev-node block height
+./scripts/query_celestia_blob.sh --block-height 100
+
+# chỉ định tay DA/blob height
+./scripts/query_celestia_blob.sh --height 620070
+
+# query theo khoảng DA height
+./scripts/query_celestia_blob_range.sh --from-height 620000 --to-height 620020
 ```
 
 Config endpoint RPC:
@@ -224,4 +294,31 @@ Config endpoint contract API:
 ```bash
 ./scripts/deploy-sample-contract.sh
 ./scripts/submit-tx.sh
+```
+
+## 9) Tiện ích encode/decode base64
+
+Script dùng:
+
+```bash
+./scripts/base64-tool.sh
+```
+
+Các lệnh nhanh:
+
+```bash
+# encode từ text
+./scripts/base64-tool.sh encode --text 'hello'
+
+# encode từ stdin
+echo -n 'hello' | ./scripts/base64-tool.sh encode
+
+# decode từ text base64
+./scripts/base64-tool.sh decode --text 'aGVsbG8='
+
+# decode từ file
+./scripts/base64-tool.sh decode --file /tmp/payload.b64
+
+# decode raw (không format JSON)
+./scripts/base64-tool.sh decode --file /tmp/payload.b64 --raw
 ```

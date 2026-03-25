@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -52,10 +53,10 @@ type runConfig struct {
 	logLevel        string
 	blockTime       time.Duration
 	daAddress       string
+	daSubmitAddress string
 	daAuthToken     string
 	daNamespace     string
 	uploadNamespace string
-	uploadMode      string
 	submitAPI       string
 	submitAPIType   string
 	submitInterval  time.Duration
@@ -80,6 +81,7 @@ type nodeManager struct {
 	logFile        *os.File
 	logMu          sync.Mutex
 	nodes          []nodeConfig
+	lastBlobHeight uint64
 }
 
 func main() {
@@ -190,14 +192,16 @@ func (nm *nodeManager) run() error {
 
 	log.Printf("Cosmos/WASM stack is running")
 	log.Printf("- celestia DA endpoint used by nodes: %s", nm.cfg.daAddress)
+	log.Printf("- celestia DA submit endpoint: %s", nm.cfg.daSubmitAddress)
 	log.Printf("- da namespace used by nodes: %s", nm.cfg.daNamespace)
-	log.Printf("- da upload mode: %s", nm.cfg.uploadMode)
+	log.Printf("- da upload mode: dual (engram + celestia)")
 	log.Printf("- da upload namespace: %s", nm.cfg.uploadNamespace)
 	log.Printf("- sequencer rpc: http://127.0.0.1:%d", nm.nodes[0].rpcPort)
 	log.Printf("- full node rpc: http://127.0.0.1:%d", nm.nodes[1].rpcPort)
 	log.Printf("- sequencer execution gRPC: http://127.0.0.1:%d", nm.nodes[0].execGRPCPort)
 	log.Printf("- full execution gRPC: http://127.0.0.1:%d", nm.nodes[1].execGRPCPort)
 	log.Printf("DA submission can be observed in logs containing 'submit'/'da'")
+	nm.logLatestBlobHeightHint()
 
 	return nm.monitorProcesses()
 }
@@ -436,43 +440,35 @@ func (nm *nodeManager) startFullNode() error {
 }
 
 func (nm *nodeManager) startDASubmitter() error {
-	if nm.cfg.uploadMode == "" {
-		return nil
-	}
-
-	args := []string{
+	argsEngram := []string{
 		"run", "./tools/cosmos-da-submit",
 		"--namespace", nm.cfg.uploadNamespace,
 		"--chain-log-file", nm.cfg.chainLogFile,
 		"--interval", nm.cfg.submitInterval.String(),
 		"--chain", "cosmos-wasm",
+		"--submit-api", nm.cfg.submitAPI,
+		"--api-type", nm.cfg.submitAPIType,
+	}
+	cmdEngram := exec.CommandContext(nm.ctx, "go", argsEngram...)
+	cmdEngram.Dir = nm.projectRoot
+	if err := nm.startProcess("cosmos-da-submit-engram", cmdEngram); err != nil {
+		return fmt.Errorf("start cosmos-da-submit-engram: %w", err)
 	}
 
-	switch nm.cfg.uploadMode {
-	case "engram":
-		if nm.cfg.submitAPI == "" {
-			return errors.New("engram mode requires COSMOS_DA_SUBMIT_API or ENGRAM_API_BASE")
-		}
-		args = append(args,
-			"--submit-api", nm.cfg.submitAPI,
-			"--api-type", nm.cfg.submitAPIType,
-		)
-	case "celestia":
-		if nm.cfg.daAddress == "" {
-			return errors.New("celestia mode requires DA_BRIDGE_RPC or DA_RPC")
-		}
-		args = append(args,
-			"--da-url", nm.cfg.daAddress,
-			"--auth-token", nm.cfg.daAuthToken,
-		)
-	default:
-		return fmt.Errorf("unsupported upload mode: %s", nm.cfg.uploadMode)
+	argsCelestia := []string{
+		"run", "./tools/cosmos-da-submit",
+		"--namespace", nm.cfg.daNamespace,
+		"--chain-log-file", nm.cfg.chainLogFile,
+		"--interval", nm.cfg.submitInterval.String(),
+		"--chain", "cosmos-wasm",
+		"--da-url", nm.cfg.daSubmitAddress,
+		"--da-fallback-url", nm.cfg.daAddress,
+		"--auth-token", nm.cfg.daAuthToken,
 	}
-
-	cmd := exec.CommandContext(nm.ctx, "go", args...)
-	cmd.Dir = nm.projectRoot
-	if err := nm.startProcess("cosmos-da-submit", cmd); err != nil {
-		return fmt.Errorf("start cosmos-da-submit: %w", err)
+	cmdCelestia := exec.CommandContext(nm.ctx, "go", argsCelestia...)
+	cmdCelestia.Dir = nm.projectRoot
+	if err := nm.startProcess("cosmos-da-submit-celestia", cmdCelestia); err != nil {
+		return fmt.Errorf("start cosmos-da-submit-celestia: %w", err)
 	}
 
 	return nil
@@ -547,6 +543,9 @@ func (nm *nodeManager) validateDAConfig() error {
 	if nm.cfg.daAddress == "" {
 		return errors.New("node DA endpoint is empty: set DA_BRIDGE_RPC or DA_RPC in .env")
 	}
+	if nm.cfg.daSubmitAddress == "" {
+		return errors.New("celestia submit endpoint is empty: set DA_RPC or DA_BRIDGE_RPC in .env")
+	}
 
 	if nm.cfg.daNamespace == "" {
 		return errors.New("DA namespace for nodes is empty")
@@ -555,18 +554,8 @@ func (nm *nodeManager) validateDAConfig() error {
 	if nm.cfg.uploadNamespace == "" {
 		return errors.New("DA upload namespace is empty")
 	}
-
-	switch nm.cfg.uploadMode {
-	case "engram":
-		if nm.cfg.submitAPI == "" {
-			return errors.New("COSMOS_DA_UPLOAD_MODE=engram requires COSMOS_DA_SUBMIT_API or ENGRAM_API_BASE")
-		}
-	case "celestia":
-		if nm.cfg.daAddress == "" {
-			return errors.New("COSMOS_DA_UPLOAD_MODE=celestia requires DA_BRIDGE_RPC or DA_RPC")
-		}
-	default:
-		return fmt.Errorf("unsupported upload mode: %s", nm.cfg.uploadMode)
+	if nm.cfg.submitAPI == "" {
+		return errors.New("engram submit endpoint is empty: set COSMOS_DA_SUBMIT_API or ENGRAM_API_BASE")
 	}
 
 	return nil
@@ -679,18 +668,95 @@ func (nm *nodeManager) streamLogs(name string, reader io.Reader) {
 				continue
 			}
 			formatted := fmt.Sprintf("[%s] %s", name, line)
-			log.Print(formatted)
-			nm.logMu.Lock()
-			if nm.logFile != nil {
-				_, _ = nm.logFile.WriteString(time.Now().Format(time.RFC3339) + " " + formatted + "\n")
-			}
-			nm.logMu.Unlock()
+			nm.writeLogLine(formatted)
+			nm.emitBlobHeightHint(name, line)
 		}
 	}()
 }
 
+func (nm *nodeManager) writeLogLine(line string) {
+	log.Print(line)
+	nm.logMu.Lock()
+	defer nm.logMu.Unlock()
+	if nm.logFile != nil {
+		_, _ = nm.logFile.WriteString(time.Now().Format(time.RFC3339) + " " + line + "\n")
+	}
+}
+
+func (nm *nodeManager) emitBlobHeightHint(source, line string) {
+	if strings.Contains(line, "engram_submit") && !strings.Contains(line, "da_height=") {
+		nm.writeLogLine("[runner][blob-height] engram_submit acknowledged (status=200) but DA blob height is not provided by this API")
+		return
+	}
+
+	h, ok := extractBlobHeight(line)
+	if !ok || h == 0 {
+		return
+	}
+
+	nm.logMu.Lock()
+	if h == nm.lastBlobHeight {
+		nm.logMu.Unlock()
+		return
+	}
+	nm.lastBlobHeight = h
+	nm.logMu.Unlock()
+
+	nm.writeLogLine(fmt.Sprintf("[runner][blob-height] blob_height=%d source=%s", h, source))
+}
+
+func extractBlobHeight(line string) (uint64, bool) {
+	re := regexp.MustCompile(`(?i)(?:blob_height|data_da_height|header_da_height|da_height)[=:\s]+([0-9]+)`)
+	matches := re.FindStringSubmatch(line)
+	if len(matches) < 2 {
+		return 0, false
+	}
+
+	h, err := strconv.ParseUint(matches[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return h, true
+}
+
+func (nm *nodeManager) logLatestBlobHeightHint() {
+	seqURL := fmt.Sprintf("http://127.0.0.1:%d", nm.nodes[0].rpcPort)
+
+	type latestBlockResponse struct {
+		HeaderDAHeight uint64 `json:"header_da_height"`
+		DataDAHeight   uint64 `json:"data_da_height"`
+		Height         uint64 `json:"height"`
+	}
+
+	out, err := runCommandOutput(nm.ctx, nm.projectRoot, "go", "run", "./tools/evnode-rpc", "latest-block")
+	if err != nil {
+		log.Printf("[runner][blob-height] unable to query latest block DA height from %s: %v", seqURL, err)
+		return
+	}
+
+	var resp latestBlockResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		log.Printf("[runner][blob-height] unable to parse latest block response from %s: %v", seqURL, err)
+		return
+	}
+
+	blobHeight := resp.DataDAHeight
+	if blobHeight == 0 {
+		blobHeight = resp.HeaderDAHeight
+	}
+	if blobHeight == 0 {
+		log.Printf("[runner][blob-height] latest block has no DA height yet (height=%d)", resp.Height)
+		return
+	}
+
+	nm.emitBlobHeightHint("latest-block", fmt.Sprintf("blob_height=%d", blobHeight))
+	log.Printf("[runner][blob-height] tip: ./scripts/query_celestia_blob.sh --height %d", blobHeight)
+}
+
 func (nm *nodeManager) resolveDAFromEnv() {
 	bridgeRPC := firstNonEmpty(os.Getenv("DA_BRIDGE_RPC"), os.Getenv("DA_RPC"))
+	submitRPC := firstNonEmpty(os.Getenv("DA_BRIDGE_RPC"), os.Getenv("DA_RPC"))
 	nm.cfg.daAuthToken = os.Getenv("DA_AUTH_TOKEN")
 	nm.cfg.daNamespace = firstNonEmpty(os.Getenv("DA_NAMESPACE"), "rollup")
 	nm.cfg.uploadNamespace = firstNonEmpty(os.Getenv("ENGRAM_NAMESPACE"), os.Getenv("DA_NAMESPACE"), "rollup")
@@ -698,25 +764,7 @@ func (nm *nodeManager) resolveDAFromEnv() {
 	nm.cfg.submitAPIType = firstNonEmpty(os.Getenv("COSMOS_DA_SUBMIT_API_TYPE"), "engram")
 	nm.cfg.chainLogFile = os.Getenv("CHAIN_LOG_FILE")
 	nm.cfg.daAddress = bridgeRPC
-
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("COSMOS_DA_UPLOAD_MODE")))
-	if mode == "" {
-		mode = "engram"
-	}
-	if mode != "engram" && mode != "celestia" {
-		log.Printf("Invalid COSMOS_DA_UPLOAD_MODE=%s, fallback to engram", mode)
-		mode = "engram"
-	}
-	nm.cfg.uploadMode = mode
-
-	switch nm.cfg.uploadMode {
-	case "engram":
-		if nm.cfg.submitAPI == "" {
-			log.Printf("COSMOS_DA_UPLOAD_MODE=engram but COSMOS_DA_SUBMIT_API/ENGRAM_API_BASE is empty")
-		}
-	case "celestia":
-		nm.cfg.uploadNamespace = firstNonEmpty(os.Getenv("DA_NAMESPACE"), "rollup")
-	}
+	nm.cfg.daSubmitAddress = submitRPC
 }
 
 func loadDotEnv(path string) error {
