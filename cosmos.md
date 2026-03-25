@@ -1,135 +1,227 @@
-# Cosmos Execution + WASM Unified Architecture (Full Node model)
+# Cosmos + WASM (Current Runbook)
 
-Tài liệu này thống nhất kiến trúc để **Cosmos execution (`apps/cosmos-exec`)** và **CosmWasm workflow** đi cùng một mô hình đầy đủ như `ev-node` full node (sequencer, execution, sync, DA, RPC).
+Tài liệu này chỉ giữ **trạng thái hiện tại** và các lệnh có thể chạy ngay.
 
-## 1) Trạng thái hiện tại
+## 1) Những gì đang chạy được
 
-Hiện repo có 2 đường chạy tách rời:
+- Chạy `evcosmos` full stack qua runner: sequencer + fullnode + `cosmos-exec-grpc` + DA submit sidecar.
+- Health endpoint của 2 node.
+- RPC đọc block/tx/state qua script `scripts/contracts/wasm-rpc.sh` (backend là `tools/evnode-rpc`).
 
-1. **Đường A (script WASM standalone)**
-  - `scripts/run-wasm-full-node.sh` chạy trực tiếp 2 container `wasmd` (sequencer/fullnode).
-  - Deploy/submit tx gọi CLI `wasmd` trong container.
-  - Luồng này **không đi qua** pipeline `node -> block -> execution.Executor` của ev-node.
+## 2) Chuẩn bị `.env`
 
-2. **Đường B (ev-node architecture)**
-  - `node.NewNode` cần `core/execution.Executor` + `core/sequencer.Sequencer` + DA + P2P.
-  - Runtime chuẩn đầy đủ: `Executor`, `Reaper`, `Syncer`, `Submitter`, RPC service.
-  - `apps/cosmos-exec` hiện tại chỉ là **ABCI app/server độc lập**, chưa là adapter `core/execution.Executor`.
+Yêu cầu các biến sau trong `.env`:
 
-## 2) Mục tiêu kiến trúc thống nhất
+- `DA_BRIDGE_RPC` hoặc `DA_RPC`
+- `DA_AUTH_TOKEN`
+- `DA_NAMESPACE`
+- `COSMOS_DA_UPLOAD_MODE=engram`
+- `COSMOS_DA_SUBMIT_API` hoặc `ENGRAM_API_BASE`
+- `ENGRAM_NAMESPACE`
 
-Mục tiêu: Cosmos/WASM phải chạy trong **một pipeline thống nhất kiểu ev-node full node**:
+## 3) Chạy full stack
 
-```text
-Tx ingress
-  -> Reaper (GetTxs)
-  -> Sequencer (single/based)
-  -> Executor (CreateBlock/ApplyBlock)
-  -> Cosmos Execution Engine (ABCI/Cosmos SDK + CosmWasm)
-  -> Store + P2P broadcast
-  -> Submitter (DA submit + inclusion/finality)
-  -> Syncer (DA + P2P catchup on followers)
-  -> RPC (Connect-RPC + HTTP health)
+Chạy các lệnh bên dưới tại thư mục root repo `ev-node`.
+
+### 3.1 Trường hợp A: chạy mới (clean start)
+
+Dùng khi muốn reset node data và chạy lại từ đầu:
+
+```bash
+set -a && source .env && set +a
+export COSMOS_DA_UPLOAD_MODE=engram
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
 ```
 
-Trong mô hình này:
-- **cosmos-exec** là execution engine thực thi state transition.
-- **WASM contract flow** (store/instantiate/execute/query) đi qua execution layer đó, thay vì chạy `wasmd` standalone tách rời.
-- sequencer/full node semantics bám đúng `ev-node` (`aggregator` và `sync` roles).
+Mẫu 1 dòng:
 
-## 3) Thành phần cần có để đạt mục tiêu
+```bash
+set -a && source .env && set +a && export COSMOS_DA_UPLOAD_MODE=engram && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
+```
 
-### 3.1 Execution Adapter (bắt buộc)
+### 3.2 Trường hợp B: chạy tiếp (resume data hiện có)
 
-Thiếu mảnh ghép chính là một implementation của `core/execution.Executor` cho Cosmos:
+Dùng khi muốn tiếp tục từ dữ liệu đang có (không xóa `.evcosmos-*` / `.cosmos-exec-*`):
 
-- `InitChain`
-- `GetTxs`
-- `ExecuteTxs`
-- `SetFinal`
-- `GetExecutionInfo`
-- `FilterTxs`
+```bash
+set -a && source .env && set +a
+export COSMOS_DA_UPLOAD_MODE=engram
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
+```
 
-Đề xuất 2 phương án:
+Mẫu 1 dòng:
 
-1. **ABCI direct adapter** (`execution/cosmosabci`)  
-  ev-node gọi trực tiếp ABCI app (in-process hoặc socket client).
+```bash
+set -a && source .env && set +a && export COSMOS_DA_UPLOAD_MODE=engram && go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
+```
 
-2. **gRPC bridge adapter** (`execution/grpc` + cosmos executor service)  
-  cosmos-exec expose gRPC executor API, ev-node dùng `execution/grpc.NewClient(...)`.
+### 3.3 Nếu bị báo port đang dùng
 
-> Khuyến nghị: đi theo phương án 2 trước (reuse interface sẵn có, ít đụng core).
+Runner hiện fail-fast nếu các port chính đang bị process cũ giữ (`50051/50052/38331/48331/7860/7861`).
 
-### 3.2 Cosmos app có CosmWasm module
+Khi gặp lỗi này, dọn process cũ rồi chạy lại:
 
-`apps/cosmos-exec` hiện mới tối giản (`auth` + `bank`). Để chạy WASM thực sự cần:
+```bash
+pkill -f cosmos-exec-grpc || true
+pkill -f evcosmos || true
 
-- Thêm module `x/wasm` vào app wiring.
-- Thêm keeper/config cần thiết cho wasm runtime.
-- Bổ sung tx/query route tương ứng.
+set -a && source .env && set +a
+export COSMOS_DA_UPLOAD_MODE=engram
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=false
+```
 
-### 3.3 Runner thống nhất kiểu full node
+Runner chạy foreground, mở đủ process cần thiết.
 
-Cần một app runner kiểu `apps/grpc` nhưng target Cosmos/WASM:
+### 3.4 Cách dừng khi đang chạy
 
-- parse config
-- tạo execution client (ABCI/gRPC bridge)
-- tạo sequencer (`single`/`based`)
-- `node.NewNode(...)` để chạy đầy đủ `Executor + Syncer + Submitter + RPC`
+Nếu đang chạy foreground trong terminal:
 
-## 4) Luồng runtime chuẩn sau khi thống nhất
+```bash
+# nhấn trong terminal đang chạy runner
+Ctrl+C
+```
 
-### 4.1 Aggregator (sequencer node)
+Nếu terminal bị treo hoặc cần dừng cưỡng bức:
 
-1. `Reaper` lấy tx từ execution mempool (`GetTxs`) và đẩy vào sequencer queue.
-2. `Executor` gọi `sequencer.GetNextBatch` để lấy batch (mempool + forced-inclusion).
-3. `Executor.ApplyBlock` gọi execution (`ExecuteTxs`) để cập nhật app hash.
-4. Block commit vào store, broadcast qua P2P (header trước, data sau).
-5. `Submitter` đẩy header/data lên DA, theo dõi inclusion, `SetFinal`.
+```bash
+pkill -f run-cosmos-wasm-nodes.go || true
+pkill -f cosmos-exec-grpc || true
+pkill -f evcosmos || true
+```
 
-### 4.2 Full node sync-only
+## 4) Verify nhanh sau khi start
 
-1. `Syncer` nhận block từ DA follower + P2P.
-2. Validate header/data + forced-inclusion checks.
-3. Gọi execution `ExecuteTxs` để áp state local.
-4. Persist height/state, theo kịp DA/P2P head.
+```bash
+curl http://127.0.0.1:38331/health/live
+curl http://127.0.0.1:48331/health/live
+```
 
-### 4.3 RPC/health
+Kỳ vọng: cả 2 trả về `OK`.
 
-- Connect-RPC services: block/state/p2p/config.
-- HTTP endpoints: `/health/live`, `/health/ready`, `/da/*`.
+Trong log runner, kỳ vọng có dòng submit sidecar:
 
-## 5) Lộ trình triển khai đề xuất (thực tế)
+```text
+[cosmos-da-submit] [ok][da-submitter] engram_submit ... status=200
+```
 
-### Phase 1 (MVP integration)
+## 5) API block/tx/state (không dùng `wasmd` standalone)
 
-1. Tạo execution service cho cosmos-exec theo gRPC executor interface.
-2. Tạo app runner `apps/cosmos-wasm` (hoặc mở rộng `apps/grpc`) để chạy ev-node với executor đó.
-3. Giữ script hiện tại để smoke test nhanh, nhưng thêm script mới để chạy kiến trúc thống nhất.
+Script dùng:
 
-Kết quả đạt được:
-- Sequencer/full node chạy bằng ev-node pipeline chuẩn.
-- Cosmos execution và WASM flow nằm chung một kiến trúc.
+```bash
+./scripts/contracts/wasm-rpc.sh
+```
 
-### Phase 2 (feature parity)
+Các lệnh chạy ngay:
 
-1. Bổ sung đầy đủ wasm module lifecycle và governance params.
-2. Bổ sung observability metrics/tracing riêng cho cosmos executor.
-3. E2E tests: tx -> block -> DA inclusion -> finality -> query state.
+```bash
+# trạng thái chain
+./scripts/contracts/wasm-rpc.sh status
 
-### Phase 3 (hardening)
+# block mới nhất
+./scripts/contracts/wasm-rpc.sh latest-block
 
-1. Crash recovery + replay tests.
-2. Based sequencer + forced inclusion tests cho cosmos/wasm tx.
-3. Performance bench cho `FilterTxs`, mempool scrape, execute latency.
+# block theo height
+./scripts/contracts/wasm-rpc.sh block --height 100
 
-## 6) Runbook tạm thời hiện tại
+# tìm tx theo hash (scan ngược từ latest)
+./scripts/contracts/wasm-rpc.sh tx --hash <HEX_TX_HASH>
 
-Trong khi chưa có adapter execution thống nhất, bạn có 2 lựa chọn:
+# ví dụ hash thật
+./scripts/contracts/wasm-rpc.sh tx --hash 7e9c7e32ebada67101adc9db71d2dc9e3a49e223ffb4707e4af1bd86febb9b7e
 
-- **Nhanh để dev contract:** dùng script `wasmd` standalone (đường A).
-- **Đúng kiến trúc full node ev-node:** dùng app kiểu `apps/grpc` với executor service tương thích (đường B).
+# list tx raw trong 1 block
+./scripts/contracts/wasm-rpc.sh txs --height 100
+```
 
-## 7) Kết luận
+Mẫu query tx vừa submit thành công:
 
-Để “cosmos-exec, wasm đi cùng nhau và đầy đủ như ev-node full node”, cần biến Cosmos/WASM thành **execution backend chính thức của `core/execution.Executor`** (ưu tiên qua gRPC bridge), sau đó chạy qua `node.NewNode(...)` thay vì `wasmd` standalone script.
+```bash
+./scripts/contracts/wasm-rpc.sh tx --hash 489cff18c1e56d2a112f35086bb148de84d445049dd96744937aa60984d254cf
+```
+
+Config endpoint RPC:
+
+- `EVNODE_RPC_URL` (ưu tiên)
+- hoặc `WASM_RPC_URL`
+- hoặc `NODE`
+- mặc định: `http://127.0.0.1:38331`
+
+## 6) Deploy/submit/execute/query contract (full-stack)
+
+Script dùng:
+
+```bash
+./scripts/contracts/wasm-contract.sh
+```
+
+Các lệnh chạy ngay:
+
+```bash
+# deploy (store + instantiate), tự lưu CONTRACT_ADDR vào DEPLOY_OUTPUT_FILE
+./scripts/contracts/wasm-contract.sh deploy
+
+# submit raw tx (base64)
+./scripts/contracts/wasm-contract.sh submit --tx-base64 <TX_BASE64>
+
+# execute contract
+./scripts/contracts/wasm-contract.sh execute --contract <CONTRACT_ADDR> --msg '{"transfer":{"recipient":"cosmos1...","amount":"1"}}'
+
+# query smart contract
+./scripts/contracts/wasm-contract.sh query --contract <CONTRACT_ADDR> --msg '{"balance":{"address":"cosmos1..."}}'
+```
+
+Mẫu đầy đủ đã test: submit tx rồi query tx đó
+
+```bash
+# deploy contract
+./scripts/contracts/wasm-contract.sh deploy
+
+# lấy info deploy
+source /tmp/ev-node-wasm/last-deploy.env
+
+# lấy sender mặc định
+SENDER=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx default-sender)
+
+# build raw execute tx (base64)
+TX_BASE64=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx execute \
+	--sender "$SENDER" \
+	--contract "$CONTRACT_ADDR" \
+	--msg '{"transfer":{"recipient":"'"$CONTRACT_ADDR"'","amount":"1"}}' \
+	--out base64)
+
+# submit raw tx
+SUBMIT_JSON=$(./scripts/contracts/wasm-contract.sh submit --tx-base64 "$TX_BASE64")
+echo "$SUBMIT_JSON"
+
+# query tx vừa submit bằng API block/tx
+TX_HASH=$(echo "$SUBMIT_JSON" | jq -r '.hash')
+./scripts/contracts/wasm-rpc.sh tx --hash "$TX_HASH"
+```
+
+Ví dụ hash thực tế từ lần test gần nhất:
+
+```bash
+./scripts/contracts/wasm-rpc.sh tx --hash 489cff18c1e56d2a112f35086bb148de84d445049dd96744937aa60984d254cf
+```
+
+Config endpoint contract API:
+
+- `COSMOS_EXEC_API_URL` (mặc định: `http://127.0.0.1:50051`)
+
+## 7) Lưu ý vận hành
+
+- Nếu `wasm-rpc.sh status` báo `connection refused`, nghĩa là stack chưa chạy hoặc chưa listen ở `:38331`.
+- Nếu `wasm-contract.sh` báo lỗi connect `:50051`, nghĩa là execution backend chưa chạy.
+- Nếu thấy lỗi DA submit trực tiếp từ `evcosmos` kiểu `insufficient funds ... utia`, cần nạp thêm phí cho address submit lên Celestia.
+- Dù vậy, sidecar Engram vẫn có thể hoạt động nếu log còn `engram_submit ... status=200`.
+
+## 8) Legacy fallback
+
+- Legacy `wasmd` standalone không còn là đường mặc định.
+- Nếu cần fallback script cũ, dùng trực tiếp:
+
+```bash
+./scripts/deploy-sample-contract.sh
+./scripts/submit-tx.sh
+```

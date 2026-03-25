@@ -54,6 +54,22 @@ build-da:
     @cd tools/local-da && go build -ldflags "{{ ldflags }}" -o {{ build_dir }}/local-da .
     @echo "    Check the binary with: {{ build_dir }}/local-da"
 
+# Build Cosmos/WASM node binary
+[group('build')]
+build-cosmos-wasm:
+    @echo "--> Building evcosmos"
+    @mkdir -p {{ build_dir }}
+    @cd apps/cosmos-wasm && go build -ldflags "{{ ldflags }}" -o {{ build_dir }}/evcosmos .
+    @echo "    Check the binary with: {{ build_dir }}/evcosmos"
+
+# Build Cosmos execution gRPC service binary
+[group('build')]
+build-cosmos-exec-grpc:
+    @echo "--> Building cosmos-exec-grpc"
+    @mkdir -p {{ build_dir }}
+    @cd apps/cosmos-exec && go build -ldflags "{{ ldflags }}" -o {{ build_dir }}/cosmos-exec-grpc ./cmd/cosmos-exec-grpc
+    @echo "    Check the binary with: {{ build_dir }}/cosmos-exec-grpc"
+
 # Build Docker image for local testing
 [group('build')]
 docker-build:

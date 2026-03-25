@@ -8,3 +8,9 @@ run-n nodes="1": build build-da
 run-evm-nodes nodes="1": build-da build-evm
     @echo "Starting EVM nodes..."
     @go run -tags=run_evm scripts/run-evm-nodes.go --nodes={{ nodes }}
+
+# Run Cosmos/WASM sequencer + full node with local-da and cosmos-exec gRPC
+[group('run')]
+run-cosmos-wasm-nodes: build-cosmos-wasm build-cosmos-exec-grpc
+    @echo "Starting Cosmos/WASM nodes..."
+    @go run -tags=run_cosmos_wasm scripts/run-cosmos-wasm-nodes.go

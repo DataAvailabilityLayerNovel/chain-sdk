@@ -24,9 +24,20 @@ import (
 // Returns:
 // - http.Handler: The configured HTTP handler
 func NewExecutorServiceHandler(executor execution.Executor, opts ...connect.HandlerOption) http.Handler {
+	return NewExecutorServiceHandlerWithMux(executor, nil, opts...)
+}
+
+func NewExecutorServiceHandlerWithMux(
+	executor execution.Executor,
+	register func(*http.ServeMux),
+	opts ...connect.HandlerOption,
+) http.Handler {
 	server := NewServer(executor)
 
 	mux := http.NewServeMux()
+	if register != nil {
+		register(mux)
+	}
 
 	// Configure compression to start at 1KB
 	compress1KB := connect.WithCompressMinBytes(1024)

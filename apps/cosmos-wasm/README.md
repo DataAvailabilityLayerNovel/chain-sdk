@@ -48,11 +48,35 @@ Start node:
   --da.address http://localhost:7980
 ```
 
+## Run real stack (sequencer + full node + Celestia DA)
+
+From repository root:
+
+```bash
+just run-cosmos-wasm-nodes
+```
+
+This runs a real end-to-end stack:
+
+- `cosmos-exec-grpc` for sequencer execution
+- `cosmos-exec-grpc` for full-node execution
+- `evcosmos` sequencer node (aggregator)
+- `evcosmos` full node (syncing from sequencer)
+
+Default endpoints:
+
+- Sequencer RPC: `http://127.0.0.1:38331`
+- Full node RPC: `http://127.0.0.1:48331`
+- Node DA endpoint: from `.env` (`DA_BRIDGE_RPC` or `DA_RPC`)
+
+DA upload sidecar (`tools/cosmos-da-submit`) is controlled by `COSMOS_DA_UPLOAD_MODE`:
+
+- `engram` (default): submit to `COSMOS_DA_SUBMIT_API`
+- `celestia`: submit directly via Celestia JSON-RPC (`DA_BRIDGE_RPC`/`DA_RPC`)
+
+The runner waits for RPC readiness, verifies sync window between sequencer and full node, and streams logs so DA submission events are visible.
+
 ## Next work items
 
-1. Implement Cosmos execution service exposing gRPC executor API.
-2. Extend `apps/cosmos-exec` with CosmWasm (`x/wasm`) runtime.
-3. Add end-to-end scripts to run:
-   - execution service
-   - aggregator node
-   - full sync node
+1. Extend e2e assertions to automatically check DA blobs by namespace.
+2. Expand contract-level tx tests through the gRPC executor path under dual-node topology.

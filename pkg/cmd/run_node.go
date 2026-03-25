@@ -148,7 +148,11 @@ func StartNode(
 
 	blobClient, err := blobrpc.NewWSClient(ctx, nodeConfig.DA.Address, nodeConfig.DA.AuthToken, "")
 	if err != nil {
-		return fmt.Errorf("failed to create blob client: %w", err)
+		logger.Warn().Err(err).Str("da_address", nodeConfig.DA.Address).Msg("failed to create websocket DA client, falling back to HTTP client")
+		blobClient, err = blobrpc.NewClient(ctx, nodeConfig.DA.Address, nodeConfig.DA.AuthToken, "")
+		if err != nil {
+			return fmt.Errorf("failed to create DA client over websocket and http: %w", err)
+		}
 	}
 	defer blobClient.Close()
 	daClient := block.NewDAClient(blobClient, nodeConfig, logger)

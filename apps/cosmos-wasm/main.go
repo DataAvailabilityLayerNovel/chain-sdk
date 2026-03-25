@@ -1,4 +1,3 @@
-package cosmoswasm
 package main
 
 import (
@@ -9,32 +8,31 @@ import (
 
 	"github.com/evstack/ev-node/apps/cosmos-wasm/cmd"
 	evcmd "github.com/evstack/ev-node/pkg/cmd"
+	"github.com/evstack/ev-node/pkg/config"
+)
 
+func main() {
+	rootCmd := &cobra.Command{
+		Use:   "evcosmos",
+		Short: "Evolve node with Cosmos/WASM execution bridge",
+		Long: `Run a Evolve full node with a Cosmos execution bridge.
+The execution service must implement the Evolve execution gRPC interface
+and can be backed by Cosmos SDK + CosmWasm runtime.`,
+	}
 
+	config.AddGlobalFlags(rootCmd, "evcosmos")
 
+	rootCmd.AddCommand(
+		cmd.InitCmd(),
+		cmd.RunCmd,
+		evcmd.VersionCmd,
+		evcmd.NetInfoCmd,
+		evcmd.StoreUnsafeCleanCmd,
+		evcmd.KeysCmd(),
+	)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	}		os.Exit(1)		fmt.Fprintln(os.Stderr, err)	if err := rootCmd.Execute(); err != nil {	)		evcmd.KeysCmd(),		evcmd.StoreUnsafeCleanCmd,		evcmd.NetInfoCmd,		evcmd.VersionCmd,		cmd.RunCmd,		cmd.InitCmd(),	rootCmd.AddCommand(	config.AddGlobalFlags(rootCmd, "evcosmos")	}and can be backed by Cosmos SDK + CosmWasm runtime.`,The execution service must implement the Evolve execution gRPC interface		Long: `Run a Evolve full node with a Cosmos execution bridge.		Short: "Evolve node with Cosmos/WASM execution bridge",		Use:   "evcosmos",	rootCmd := &cobra.Command{func main() {)	"github.com/evstack/ev-node/pkg/config"
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

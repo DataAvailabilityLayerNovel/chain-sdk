@@ -32,3 +32,16 @@ docs/.vitepress/cache
 .gocache
 .gomodcache
 /.cache
+
+# local cosmos/evcosmos runtime state
+.evcosmos-*/
+.cosmos-exec-*/
+.cosmos-exec-wasm/
+.cosmos-wasm-runner/
+
+# local wasm cache created by tests/executor
+**/.cosmos-exec-wasm/
+
+# local binaries
+run-cosmos-wasm-nodes
+apps/cosmos-exec/cosmos-exec-grpc
