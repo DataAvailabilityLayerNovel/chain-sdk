@@ -488,14 +488,14 @@ func (s *explorerServer) handleIndexerState(w http.ResponseWriter, r *http.Reque
 	if s.autoIndexer != nil {
 		s.autoIndexer.mu.RLock()
 		autoState = map[string]any{
-			"enabled":              s.autoIndexer.enabled,
-			"running":              s.autoIndexer.running,
-			"interval":             s.autoIndexer.interval.String(),
-			"max_blocks_per_tick":  s.autoIndexer.maxBlocksPerTick,
-			"last_run_at":          formatTimeOrEmpty(s.autoIndexer.lastRunAt),
-			"last_error":           s.autoIndexer.lastError,
-			"last_indexed_height":  s.autoIndexer.lastIndexedHeight,
-			"last_chain_height":    s.autoIndexer.lastChainHeight,
+			"enabled":               s.autoIndexer.enabled,
+			"running":               s.autoIndexer.running,
+			"interval":              s.autoIndexer.interval.String(),
+			"max_blocks_per_tick":   s.autoIndexer.maxBlocksPerTick,
+			"last_run_at":           formatTimeOrEmpty(s.autoIndexer.lastRunAt),
+			"last_error":            s.autoIndexer.lastError,
+			"last_indexed_height":   s.autoIndexer.lastIndexedHeight,
+			"last_chain_height":     s.autoIndexer.lastChainHeight,
 			"last_indexed_in_batch": s.autoIndexer.lastIndexedInBatch,
 		}
 		s.autoIndexer.mu.RUnlock()
