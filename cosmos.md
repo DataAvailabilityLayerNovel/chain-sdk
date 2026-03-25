@@ -346,3 +346,85 @@ echo -n 'hello' | ./scripts/base64-tool.sh encode
 # decode raw (không format JSON)
 ./scripts/base64-tool.sh decode --file /tmp/payload.b64 --raw
 ```
+
+## 10) Explorer API + Indexer DB (P1 + P2)
+
+Repo đã có tool explorer dùng lại RPC evnode cho chain cosmos:
+
+```bash
+go run ./tools/cosmos-explorer help
+```
+
+### 10.1 P1 - chạy Explorer API ổn định (block/tx/search + DA endpoint hiện có)
+
+Chạy API server:
+
+```bash
+go run ./tools/cosmos-explorer serve --addr :8090
+```
+
+Auto-index nền (P2.5, mặc định bật khi `serve`):
+
+```bash
+go run ./tools/cosmos-explorer serve --addr :8090 --auto-index=true --sync-interval 3s --max-blocks-per-tick 50
+```
+
+Endpoint chính:
+
+- `GET /health`
+- `GET /api/v1/status`
+- `GET /api/v1/blocks/latest`
+- `GET /api/v1/blocks/{height}`
+- `GET /api/v1/txs/{hash}`
+- `GET /api/v1/search?q=<height_or_tx_hash>`
+- `GET /api/v1/indexer/state`
+
+DA endpoint được reuse từ evnode RPC server qua proxy:
+
+- `GET /api/v1/da`
+- `GET /api/v1/da/submissions`
+- `GET /api/v1/da/stats`
+- `GET /api/v1/da/blob?id=<blob_id>&namespace=<hex_or_text_ns>`
+
+Ví dụ:
+
+```bash
+curl -sS http://127.0.0.1:8090/api/v1/status | jq .
+curl -sS http://127.0.0.1:8090/api/v1/blocks/latest | jq .
+curl -sS 'http://127.0.0.1:8090/api/v1/search?q=100' | jq .
+```
+
+### 10.2 P2 - Indexer DB + reindex theo height
+
+Indexer dùng local BoltDB tại `.data/cosmos-explorer/index.db`.
+
+Reindex từ đầu đến latest chain height:
+
+```bash
+go run ./tools/cosmos-explorer reindex --from 1
+```
+
+Reindex theo range:
+
+```bash
+go run ./tools/cosmos-explorer reindex --from 100 --to 500
+```
+
+Resume tự động từ height đã index gần nhất:
+
+```bash
+go run ./tools/cosmos-explorer reindex
+```
+
+Xem trạng thái indexer:
+
+```bash
+curl -sS http://127.0.0.1:8090/api/v1/indexer/state | jq .
+```
+
+`/api/v1/indexer/state` hiện có thêm `auto_indexer` để theo dõi trạng thái vòng sync nền (running/last_error/last_indexed_in_batch...).
+
+Lưu ý:
+
+- `serve` và `reindex` đều dùng `EVNODE_RPC_URL` (fallback `WASM_RPC_URL`, `NODE`, mặc định `http://127.0.0.1:38331`).
+- Nếu node chưa chạy, endpoint Explorer trả lỗi upstream (`bad gateway`) cho tới khi RPC sống lại.
