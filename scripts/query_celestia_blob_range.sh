@@ -101,11 +101,14 @@ query_height() {
   local h="$1"
   local response
   local http_code
+  local payload
+
+  payload="$(jq -nc --argjson h "$h" --arg ns "$NAMESPACE" '{jsonrpc:"2.0", id:1, method:"blob.GetAll", params:[$h,[$ns]]}')"
 
   response=$(curl -sS -w '\n%{http_code}' -X POST "$CELESTIA_RPC" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
-    -d "{\n      \"jsonrpc\": \"2.0\",\n      \"id\": 1,\n      \"method\": \"blob.GetAll\",\n      \"params\": [\n        $h,\n        [\"$NAMESPACE\"]\n      ]\n    }")
+    -d "$payload")
 
   http_code="$(printf '%s' "$response" | tail -n 1)"
   response="$(printf '%s' "$response" | sed '$d')"

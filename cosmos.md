@@ -208,6 +208,15 @@ Các mẫu:
 
 # query theo khoảng DA height
 ./scripts/query_celestia_blob_range.sh --from-height 620000 --to-height 620020
+
+# watch blob mới nhất liên tục
+./scripts/watch_celestia_latest_blobs.sh
+
+# watch 1 vòng (dùng để smoke test)
+./scripts/watch_celestia_latest_blobs.sh --once --backfill 5
+
+# nếu cần hiện lỗi RPC để debug
+./scripts/watch_celestia_latest_blobs.sh --show-errors
 ```
 
 Config endpoint RPC:
