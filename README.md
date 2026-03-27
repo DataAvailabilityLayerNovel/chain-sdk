@@ -1,6 +1,6 @@
-# EV-node
+# EV-node Cosmos Chain Hub
 
-Ev-node is the basis of the Evolve Stack. For more in-depth information about Evolve, please visit our [website][docs].
+EV-node là nền tảng để chạy chain Cosmos + WASM trên DA layer (Celestia) theo mô hình sequencer + fullnode.
 
 <!-- markdownlint-disable MD013 -->
 [![Go Report Card](https://goreportcard.com/badge/github.com/evstack/ev-node)](https://goreportcard.com/report/github.com/evstack/ev-node)
@@ -8,124 +8,115 @@ Ev-node is the basis of the Evolve Stack. For more in-depth information about Ev
 [![GoDoc](https://godoc.org/github.com/evstack/ev-node?status.svg)](https://godoc.org/github.com/evstack/ev-node)
 <!-- markdownlint-enable MD013 -->
 
-> **⚠️ Version Notice**: Do not use tags or releases before v1.*. Pre-v1 releases are not stable and should be considered abandoned.
+> **Version note**: Không dùng tag/release trước `v1.*` cho môi trường production.
 
-## Using Evolve
+## 1) Tài liệu chính
 
-Evolve supports multiple sync modes:
+- Runbook Cosmos + WASM: [cosmos.md](cosmos.md)
+- Go SDK cho dApp chain + WASM tx/query: [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md)
+- Runner full stack: [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go)
+- Contract helper scripts:
+	- [scripts/contracts/wasm-contract.sh](scripts/contracts/wasm-contract.sh)
+	- [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh)
 
-- **Hybrid sync**: Sync from both DA layer and P2P network (default when peers are configured)
-- **DA-only sync**: Sync exclusively from DA layer by leaving P2P peers empty (see [Configuration Guide](docs/learn/config.md#da-only-sync-mode))
-- **P2P-priority sync**: Prioritize P2P with DA as fallback
+## 2) Kiến trúc chain Cosmos trong repo
 
-### Example Implementation: TestApp CLI
+- `apps/cosmos-wasm`: node binary `evcosmos`
+- `apps/cosmos-exec`: execution backend `cosmos-exec-grpc`
+- `scripts/run-cosmos-wasm-nodes.go`: orchestration sequencer + fullnode + exec services
+- DA submit: đi trực tiếp qua runtime evnode (aggregator), không cần sidecar `cosmos-da-submit`
 
-The easiest way to understand how to use Evolve is by exploring our example implementation, TestApp.
+Luồng tổng quát:
 
-Requires Go version >= 1.22.
+1. `evcosmos-sequencer` produce block
+2. `cosmos-exec-grpc` execute tx / cập nhật state
+3. Sequencer submit header/data lên DA
+4. `evcosmos-fullnode` sync qua P2P + DA fallback
 
-TestApp is a CLI tool that demonstrates how to run different kinds of nodes using the Evolve framework.
-It serves as a reference implementation and helps you understand how to build your own Evolve-based blockchain.
+## 3) Quickstart chạy chain (CLI)
 
-#### Install
-
-To install the example `testapp`, simply run the following command at the root of the
-ev-node repo:
-
-```bash
-just install
-```
-
-The latest TestApp example is now installed. You can verify the installation by running:
-
-```bash
-testapp version
-```
-
-#### Quick Start
-
-You can spin up a local TestApp network (powered by Evolve) with the following command:
+Tại root repo:
 
 ```bash
-testapp start
+set -a && source .env && set +a
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
 ```
 
-## Building with Evolve
-
-Evolve is the first sovereign application framework that allows you to launch
-a sovereign, customizable blockchain as easily as a smart contract.
-TestApp serves as a reference implementation to help you get started with your own Evolve-based blockchain.
-
-Check out our tutorials on our [website][docs].
-
-## Onboarding with Claude Code
-
-Use [Claude Code](https://claude.ai/code) to explore the codebase:
+Health check:
 
 ```bash
-cd ev-node && claude
+curl -sS http://127.0.0.1:38331/health/live
+curl -sS http://127.0.0.1:48331/health/live
 ```
 
-Example prompts:
+Dọn process nếu kẹt port:
 
-| Goal | Prompt |
-|------|--------|
-| Overview | "How does ev-node work?" |
-| Block package | "Explain block production flow" |
-| DA layer | "How does the DA layer work?" |
-| Sequencing | "Explain single vs based sequencer" |
-
-The `.claude/skills/ev-node-explainer/` skill provides architecture docs for block, DA, and sequencing systems.
-
-## Contributing
-
-We welcome your contributions! Everyone is welcome to contribute, whether it's
-in the form of code, documentation, bug reports, feature
-requests, or anything else.
-
-If you're looking for issues to work on, try looking at the
-[good first issue list](https://github.com/evstack/ev-node/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-Issues with this tag are suitable for a new external contributor and is a great
-way to find something you can help with!
-
-See
-[the contributing guide](https://github.com/evstack/ev-node/blob/main/CONTRIBUTING.md)
-for more details.
-
-Please join our
-[Community Discord](https://discord.com/invite/YsnTPcSfWQ)
-to ask questions, discuss your ideas, and connect with other contributors.
-
-### Helpful commands
-
-```sh
-# Run unit tests
-just test
-
-# Generate protobuf files (requires Docker)
-just proto-gen
-
-# Run linters (requires golangci-lint, markdownlint, hadolint, and yamllint)
-just lint
-
-# Lint protobuf files (requires Docker and buf)
-just proto-lint
-
+```bash
+pkill -f cosmos-exec-grpc || true
+pkill -f evcosmos || true
+pkill -f run-cosmos-wasm-nodes.go || true
 ```
 
-### Tools
+Chi tiết đầy đủ: [cosmos.md](cosmos.md)
 
-1. Install [golangci-lint](https://golangci-lint.run/welcome/install/)
-1. Install [markdownlint](https://github.com/DavidAnson/markdownlint)
-1. Install [hadolint](https://github.com/hadolint/hadolint)
-1. Install [yamllint](https://yamllint.readthedocs.io/en/stable/quickstart.html)
+## 4) Quickstart chạy chain bằng SDK
 
-## Audits
+SDK package:
 
-| Date | Auditor | Version | Report |
-|---|---|---|---|
-| 2024/01/12 | [Informal Systems](https://informal.systems/) | [eccdd...bcb9d](https://github.com/evstack/ev-node/commit/eccdd0f1793a5ac532011ef4d896de9e0d8bcb9d) | [informal-systems.pdf](docs/audit/informal-systems.pdf) |
-| 2024/01/10 | [Binary Builders](https://binary.builders/)   | [eccdd...bcb9d](https://github.com/evstack/ev-node/commit/eccdd0f1793a5ac532011ef4d896de9e0d8bcb9d) | [binary-builders.pdf](docs/audit/binary-builders.pdf)   |
+`github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm`
 
-[docs]: <https://ev.xyz>
-# chain
+Ví dụ runnable:
+
+- Start chain: [apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain/main.go)
+- Start chain + deploy contract: [apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy/main.go)
+
+Chạy nhanh:
+
+```bash
+cd apps/cosmos-exec
+
+export EVNODE_PROJECT_ROOT=/absolute/path/to/ev-node
+export CHAIN_NAME=my-dapp-chain
+export DA_NAMESPACE=my-dapp-namespace
+export DA_BRIDGE_RPC=https://<celestia-bridge-rpc>
+export DA_AUTH_TOKEN=<token>
+
+go run ./sdk/cosmoswasm/examples/dapp-chain
+```
+
+## 5) Lệnh thường dùng cho Cosmos chain
+
+- RPC state/block/tx:
+	- `./scripts/contracts/wasm-rpc.sh status`
+	- `./scripts/contracts/wasm-rpc.sh latest-block`
+	- `./scripts/contracts/wasm-rpc.sh tx --hash <HEX_TX_HASH>`
+- Contract flow:
+	- `./scripts/contracts/wasm-contract.sh deploy`
+	- `./scripts/contracts/wasm-contract.sh execute --contract <ADDR> --msg '<JSON>'`
+	- `./scripts/contracts/wasm-contract.sh query --contract <ADDR> --msg '<JSON>'`
+- DA blob query/watch:
+	- `./scripts/query_celestia_blob.sh`
+	- `./scripts/query_celestia_blob_range.sh --from-height <N> --to-height <M>`
+	- `./scripts/watch_celestia_latest_blobs.sh --show-errors`
+
+## 6) Biến môi trường quan trọng
+
+- `DA_BRIDGE_RPC` hoặc `DA_RPC`
+- `DA_AUTH_TOKEN`
+- `DA_NAMESPACE`
+- (SDK/examples) `CHAIN_NAME`, `EVNODE_PROJECT_ROOT`
+
+Lưu ý: tránh set sai `DA_NAMESPACE_B64` thủ công. Namespace query/submit nên đồng bộ từ `DA_NAMESPACE`.
+
+## 7) Test nhanh phần SDK
+
+```bash
+cd apps/cosmos-exec
+go test ./sdk/cosmoswasm/...
+```
+
+## 8) Contributing
+
+- Hướng dẫn đóng góp: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Bộ docs tổng quan: [docs/README.md](docs/README.md)
+- Website Evolve: [ev.xyz](https://ev.xyz)
