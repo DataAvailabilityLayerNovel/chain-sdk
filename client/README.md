@@ -38,6 +38,17 @@ This directory is structured to support additional client libraries in the futur
 
 - JavaScript/TypeScript client
 - Python client
-- Go client
+- More Go clients
+
+## Go Cosmos WASM SDK
+
+Go SDK cho Cosmos WASM hiện có tại [../apps/cosmos-exec/sdk/cosmoswasm](../apps/cosmos-exec/sdk/cosmoswasm/README.md).
+
+SDK hiện hỗ trợ:
+
+- Build raw tx (`store`, `instantiate`, `execute`)
+- Submit tx qua `cosmos-exec-grpc`
+- Wait tx result theo hash
+- Query smart contract (`/wasm/query-smart`)
 
 Each language will have its own subdirectory with generated types and high-level client implementations.

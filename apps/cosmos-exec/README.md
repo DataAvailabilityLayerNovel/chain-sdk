@@ -18,3 +18,14 @@ go run ./cmd/cosmos-exec-grpc --address 0.0.0.0:50051 --in-memory
 - `WasmKeeper` is wired to real IBC keepers (`IBCKeeper.ChannelKeeper`, `IBCKeeper.PortKeeper`, scoped capabilities, `TransferKeeper`).
 - This is a bridge skeleton to unblock `apps/cosmos-wasm` full-node flow.
 - Full production parity still requires wiring real staking/distribution keepers for wasm query plugin behavior and e2e verification of contract lifecycle.
+
+## Go SDK for dApp users
+
+Public Go SDK cho Cosmos WASM nằm tại [sdk/cosmoswasm](sdk/cosmoswasm/README.md).
+
+SDK hỗ trợ:
+
+- Build raw tx (`store`, `instantiate`, `execute`)
+- Submit tx (`/tx/submit`)
+- Query tx result (`/tx/result`)
+- Query smart contract (`/wasm/query-smart`)
