@@ -14,10 +14,12 @@ EV-node là nền tảng để chạy chain Cosmos + WASM trên DA layer (Celest
 
 - Runbook Cosmos + WASM: [cosmos.md](cosmos.md)
 - Go SDK cho dApp chain + WASM tx/query: [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md)
+- **CLI SDK (dal-sdk)**: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md)
 - Runner full stack: [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go)
 - Contract helper scripts:
 	- [scripts/contracts/wasm-contract.sh](scripts/contracts/wasm-contract.sh)
 	- [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh)
+- Chain SDK Go modules: [github.com/DataAvailabilityLayerNovel/chain-sdk](https://github.com/DataAvailabilityLayerNovel/chain-sdk)
 
 ## 2) Kiến trúc chain Cosmos trong repo
 
@@ -84,7 +86,49 @@ export DA_AUTH_TOKEN=<token>
 go run ./sdk/cosmoswasm/examples/dapp-chain
 ```
 
-## 5) Lệnh thường dùng cho Cosmos chain
+## 4a) Quickstart CLI SDK (dal-sdk)
+
+**dal-sdk** là CLI tool để manage dApp chain, submit tx, deploy/query contract, và thao tác native bank operations **không cần viết Go code**.
+
+### Build
+
+```bash
+cd apps/cosmos-exec
+go build -o dal-sdk ./cmd/dal-sdk
+```
+
+### Gọi lệnh
+
+```bash
+# Start chain
+./dal-sdk chain start --name mycosmos --namespace rollup --da-rpc http://127.0.0.1:26758
+
+# Deploy CW20 contract
+./dal-sdk contract deploy-cw20 \
+  --wasm ./cw20_base.wasm \
+  --name Token \
+  --symbol TOK \
+  --supply 1000000
+
+# Send native tokens
+./dal-sdk bank send --to cosmos1... --amount 1000stake
+
+# Execute contract
+./dal-sdk contract execute --contract cosmos1... --msg '{"increment":{}}'
+
+# Query tx result
+./dal-sdk tx result --hash <tx_hash>
+```
+
+**Các command groups:**
+- `chain` — Start/manage dApp chain
+- `tx` — Submit & track transactions
+- `contract` — WASM contract operations (store, instantiate, execute, query, deploy, balance, transfer)
+- `bank` — Native coin operations (send, balance check)
+
+Xem chi tiết: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md)
+
+## 5) Lệnh thường dùng cho Cosmos chain (Scripts)
 
 - RPC state/block/tx:
 	- `./scripts/contracts/wasm-rpc.sh status`
@@ -99,24 +143,40 @@ go run ./sdk/cosmoswasm/examples/dapp-chain
 	- `./scripts/query_celestia_blob_range.sh --from-height <N> --to-height <M>`
 	- `./scripts/watch_celestia_latest_blobs.sh --show-errors`
 
-## 6) Biến môi trường quan trọng
+## 6) Biến môi trường & địa chỉ endpoint
 
-- `DA_BRIDGE_RPC` hoặc `DA_RPC`
-- `DA_AUTH_TOKEN`
-- `DA_NAMESPACE`
-- (SDK/examples) `CHAIN_NAME`, `EVNODE_PROJECT_ROOT`
+### Biến DA (Data Availability)
+- `DA_BRIDGE_RPC` hoặc `DA_RPC` — Celestia bridge RPC endpoint
+- `DA_AUTH_TOKEN` — Authentication token cho DA layer
+- `DA_NAMESPACE` — Namespace cho DA submit/query
 
-Lưu ý: tránh set sai `DA_NAMESPACE_B64` thủ công. Namespace query/submit nên đồng bộ từ `DA_NAMESPACE`.
+### Biến Chain
+- `CHAIN_NAME` — Tên dApp chain (SDK/examples)
+- `EVNODE_PROJECT_ROOT` — Địa chỉ root folder ev-node (SDK/examples)
 
-## 7) Test nhanh phần SDK
+### Endpoint mặc định
+- **Exec API (gRPC)**: `http://127.0.0.1:50051` — Dùng cho tx submit, contract operations
+- **Cosmos REST**: `http://127.0.0.1:38331` — Dùng cho bank balance query
+- **Cosmos RPC**: `http://127.0.0.1:38657` — State/block/tx queries
+
+**Lưu ý**: Tránh set sai `DA_NAMESPACE_B64` thủ công. Namespace query/submit nên đồng bộ từ `DA_NAMESPACE`.
+
+## 7) Go SDK Package
+
+Dành cho dApp developers integrate với chain theo lập trình:
 
 ```bash
 cd apps/cosmos-exec
 go test ./sdk/cosmoswasm/...
 ```
 
+**Go module**: `github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm`
+
+API reference: [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md)
+
 ## 8) Contributing
 
 - Hướng dẫn đóng góp: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Bộ docs tổng quan: [docs/README.md](docs/README.md)
+- Chain SDK repo: [github.com/DataAvailabilityLayerNovel/chain-sdk](https://github.com/DataAvailabilityLayerNovel/chain-sdk)
 - Website Evolve: [ev.xyz](https://ev.xyz)

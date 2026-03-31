@@ -10,6 +10,34 @@ Package:
 
 `github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm`
 
+---
+
+### ⚡ Quick Note: CLI Alternative
+
+Không muốn viết Go code? Sử dụng **CLI tool** thay vì SDK programmatically:
+
+```bash
+cd apps/cosmos-exec
+go build -o dal-sdk ./cmd/dal-sdk
+
+# Start chain
+./dal-sdk chain start --name mychain --namespace myns --da-rpc <url> --project-root /path/to/ev-node
+
+# Deploy contract (store + instantiate)
+./dal-sdk contract deploy --wasm ./contract.wasm --init-msg '{"count":0}' --rpc http://127.0.0.1:50051
+
+# Execute/query/check balance (CW20)
+./dal-sdk contract execute --contract cosmos1... --msg '{"transfer":{"recipient":"cosmos1...","amount":"10"}}' --rpc http://127.0.0.1:50051
+./dal-sdk contract query --contract cosmos1... --msg '{"token_info":{}}' --rpc http://127.0.0.1:50051
+./dal-sdk contract balance --contract cosmos1... --address cosmos1... --rpc http://127.0.0.1:50051
+
+# Submit signed tx and check result
+./dal-sdk tx submit --tx-base64 "<tx_base64>" --rpc http://127.0.0.1:50051 --wait
+./dal-sdk tx result --hash <tx_hash> --rpc http://127.0.0.1:50051
+```
+
+---
+
 ## 1) Cài đặt
 
 ```bash
