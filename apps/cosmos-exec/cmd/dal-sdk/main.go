@@ -18,9 +18,9 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	txv1beta1 "github.com/cosmos/cosmos-sdk/types/tx"
-	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/gogoproto/proto"
+	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 	"github.com/spf13/cobra"
 )
 
