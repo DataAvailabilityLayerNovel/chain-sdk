@@ -46,6 +46,9 @@ func main() {
 		mux.HandleFunc("/tx/submit", submitTxHandler(cosmosExecutor))
 		mux.HandleFunc("/tx/result", txResultHandler(cosmosExecutor))
 		mux.HandleFunc("/wasm/query-smart", querySmartHandler(cosmosExecutor))
+		mux.HandleFunc("/blob/submit", blobSubmitHandler(cosmosExecutor))
+		mux.HandleFunc("/blob/retrieve", blobRetrieveHandler(cosmosExecutor))
+		mux.HandleFunc("/blob/batch", blobBatchHandler(cosmosExecutor))
 	})
 
 	srv := &http.Server{
@@ -225,6 +228,150 @@ func decodeTx(hexInput, base64Input string) ([]byte, error) {
 	}
 
 	return nil, errors.New("tx_base64 or tx_hex is required")
+}
+
+type blobSubmitRequest struct {
+	DataBase64 string `json:"data_base64"`
+}
+
+type blobSubmitResponse struct {
+	Commitment string `json:"commitment"`
+	Size       int    `json:"size"`
+}
+
+type blobRetrieveResponse struct {
+	Commitment string `json:"commitment"`
+	DataBase64 string `json:"data_base64"`
+	Size       int    `json:"size"`
+}
+
+func blobSubmitHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+
+		var req blobSubmitRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		req.DataBase64 = strings.TrimSpace(req.DataBase64)
+		if req.DataBase64 == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_base64 is required"})
+			return
+		}
+
+		data, err := base64.StdEncoding.DecodeString(req.DataBase64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid base64: " + err.Error()})
+			return
+		}
+
+		commitment, err := exec.StoreBlob(r.Context(), data)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, blobSubmitResponse{
+			Commitment: commitment,
+			Size:       len(data),
+		})
+	}
+}
+
+type blobBatchRequest struct {
+	BlobsBase64 []string `json:"blobs_base64"`
+}
+
+type blobBatchResponse struct {
+	Root        string   `json:"root"`
+	Commitments []string `json:"commitments"`
+	Count       int      `json:"count"`
+}
+
+func blobBatchHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+
+		var req blobBatchRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		if len(req.BlobsBase64) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "blobs_base64 is required and must not be empty"})
+			return
+		}
+
+		blobs := make([][]byte, 0, len(req.BlobsBase64))
+		for i, b64 := range req.BlobsBase64 {
+			data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid base64 at index %d: %v", i, err)})
+				return
+			}
+			blobs = append(blobs, data)
+		}
+
+		root, commitments, err := exec.StoreBatch(r.Context(), blobs)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, blobBatchResponse{
+			Root:        root,
+			Commitments: commitments,
+			Count:       len(commitments),
+		})
+	}
+}
+
+func blobRetrieveHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		commitment := strings.TrimSpace(r.URL.Query().Get("commitment"))
+		if commitment == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitment is required"})
+			return
+		}
+
+		data, err := exec.RetrieveBlob(r.Context(), commitment)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, blobRetrieveResponse{
+			Commitment: commitment,
+			DataBase64: base64.StdEncoding.EncodeToString(data),
+			Size:       len(data),
+		})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

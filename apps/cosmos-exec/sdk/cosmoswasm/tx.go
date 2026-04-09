@@ -80,6 +80,80 @@ func BuildExecuteTx(req ExecuteTxRequest) ([]byte, error) {
 	})
 }
 
+// BuildBlobCommitTx builds a WASM execute transaction that records a blob
+// commitment in a CosmWasm contract.  This is the on-chain half of the
+// blob-first pattern: large data lives in the blob store (off WASM state),
+// and only a 32-byte commitment is written to the contract.
+//
+// The contract message sent is:
+//
+//	{"record_blob": {"commitment": "<hex>", "tag": "<tag>", ...extra}}
+//
+// Your WASM contract must handle a "record_blob" execute message.
+func BuildBlobCommitTx(req BlobCommitTxRequest) ([]byte, error) {
+	commitment := strings.TrimSpace(req.Commitment)
+	if commitment == "" {
+		return nil, errors.New("commitment is required")
+	}
+	contract := strings.TrimSpace(req.Contract)
+	if contract == "" {
+		return nil, errors.New("contract is required")
+	}
+
+	inner := map[string]any{
+		"commitment": commitment,
+	}
+	if tag := strings.TrimSpace(req.Tag); tag != "" {
+		inner["tag"] = tag
+	}
+	for k, v := range req.Extra {
+		inner[k] = v
+	}
+
+	return BuildExecuteTx(ExecuteTxRequest{
+		Sender:   req.Sender,
+		Contract: contract,
+		Msg:      map[string]any{"record_blob": inner},
+	})
+}
+
+// BuildBatchRootTx builds a WASM execute transaction that records a Merkle
+// batch root in a CosmWasm contract.  This is the on-chain half of CommitRoot:
+// N blobs stored off-chain, one 32-byte root written to the contract.
+//
+// The contract message sent is:
+//
+//	{"record_batch": {"root": "<hex>", "count": N, "tag": "<tag>", ...extra}}
+//
+// Your WASM contract must handle a "record_batch" execute message.
+func BuildBatchRootTx(req BatchRootTxRequest) ([]byte, error) {
+	root := strings.TrimSpace(req.Root)
+	if root == "" {
+		return nil, errors.New("root is required")
+	}
+	contract := strings.TrimSpace(req.Contract)
+	if contract == "" {
+		return nil, errors.New("contract is required")
+	}
+
+	inner := map[string]any{
+		"root":  root,
+		"count": req.Count,
+	}
+	if tag := strings.TrimSpace(req.Tag); tag != "" {
+		inner["tag"] = tag
+	}
+	for k, v := range req.Extra {
+		inner[k] = v
+	}
+
+	return BuildExecuteTx(ExecuteTxRequest{
+		Sender:   req.Sender,
+		Contract: contract,
+		Msg:      map[string]any{"record_batch": inner},
+	})
+}
+
 func EncodeTxBase64(tx []byte) string {
 	return base64.StdEncoding.EncodeToString(tx)
 }

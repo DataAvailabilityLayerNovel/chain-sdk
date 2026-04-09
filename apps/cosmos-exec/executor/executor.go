@@ -32,6 +32,11 @@ type CosmosExecutor struct {
 
 	mempool   [][]byte
 	txResults map[string]TxExecutionResult
+
+	// blobStore holds large data blobs off WASM contract state.
+	// Callers store the returned commitment (32-byte SHA-256 hex) on-chain
+	// via a WASM message, keeping gas costs minimal.
+	blobStore *BlobStore
 }
 
 type TxEventAttribute struct {
@@ -57,7 +62,43 @@ func New(appInstance *app.App) *CosmosExecutor {
 		app:       appInstance,
 		mempool:   make([][]byte, 0, 1024),
 		txResults: make(map[string]TxExecutionResult),
+		blobStore: NewBlobStore(),
 	}
+}
+
+// StoreBlob stores arbitrary data in the executor's content-addressed blob
+// store and returns a hex-encoded SHA-256 commitment.  The caller should
+// record this commitment in their WASM contract (cheap, 32 bytes on-chain)
+// rather than embedding the raw data in a contract message.
+func (e *CosmosExecutor) StoreBlob(ctx context.Context, data []byte) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return e.blobStore.Put(data)
+}
+
+// RetrieveBlob fetches a blob by its SHA-256 commitment.
+// Returns an error when the commitment is not found in the local store.
+func (e *CosmosExecutor) RetrieveBlob(ctx context.Context, commitment string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	data, ok := e.blobStore.Get(commitment)
+	if !ok {
+		return nil, fmt.Errorf("blob not found: %s", commitment)
+	}
+	return data, nil
+}
+
+// StoreBatch stores multiple blobs atomically, computes a binary Merkle root
+// over their SHA-256 commitments, and returns (root, commitments).
+// Commit the root on-chain via BuildBatchRootTx; individual commitments allow
+// per-blob retrieval and Merkle inclusion proofs.
+func (e *CosmosExecutor) StoreBatch(ctx context.Context, blobs [][]byte) (root string, commitments []string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	return e.blobStore.PutBatch(blobs)
 }
 
 func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, initialHeight uint64, chainID string) ([]byte, error) {

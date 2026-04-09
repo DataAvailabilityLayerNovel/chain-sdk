@@ -45,3 +45,4 @@ docs/.vitepress/cache
 # local binaries
 run-cosmos-wasm-nodes
 apps/cosmos-exec/cosmos-exec-grpc
+rm.ipynb
