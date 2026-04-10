@@ -60,16 +60,18 @@ type CommitRootRequest struct {
 // Merkle inclusion proofs.
 func (c *Client) CommitRoot(ctx context.Context, req CommitRootRequest) (*CommitReceipt, error) {
 	if len(req.Blobs) == 0 {
-		return nil, errors.New("blobs cannot be empty")
+		return nil, sdkErr("CommitRoot", errors.New("blobs cannot be empty"),
+			"pass at least one blob; for single values use SubmitBlob instead")
 	}
 	if strings.TrimSpace(req.Contract) == "" {
-		return nil, errors.New("contract is required")
+		return nil, sdkErr("CommitRoot", ErrContractMissing,
+			"set CommitRootRequest.Contract to your WASM contract bech32 address")
 	}
 
 	// 1. Upload all blobs as a batch → get root + per-blob commitments.
 	batchRes, err := c.SubmitBatch(ctx, req.Blobs)
 	if err != nil {
-		return nil, err
+		return nil, classifyHTTPError("CommitRoot/SubmitBatch", err)
 	}
 
 	// 2. Record the Merkle root in the WASM contract (one small tx).
@@ -82,12 +84,13 @@ func (c *Client) CommitRoot(ctx context.Context, req CommitRootRequest) (*Commit
 		Extra:    req.Extra,
 	})
 	if err != nil {
-		return nil, err
+		return nil, sdkErr("CommitRoot/BuildBatchRootTx", err,
+			"ensure your contract address is valid bech32")
 	}
 
 	submitRes, err := c.SubmitTxBytes(ctx, tx)
 	if err != nil {
-		return nil, err
+		return nil, classifyHTTPError("CommitRoot/SubmitTx", err)
 	}
 
 	// 3. Build per-blob refs.
@@ -121,7 +124,8 @@ func (c *Client) CommitCritical(ctx context.Context, req CommitRootRequest) (*Co
 // in a single request and returns the Merkle root + per-blob commitments.
 func (c *Client) SubmitBatch(ctx context.Context, blobs [][]byte) (*BlobBatchResponse, error) {
 	if len(blobs) == 0 {
-		return nil, errors.New("blobs cannot be empty")
+		return nil, sdkErr("SubmitBatch", errors.New("blobs cannot be empty"),
+			"pass at least one blob")
 	}
 
 	encoded := make([]string, len(blobs))
@@ -131,7 +135,7 @@ func (c *Client) SubmitBatch(ctx context.Context, blobs [][]byte) (*BlobBatchRes
 
 	res := BlobBatchResponse{}
 	if err := c.doJSON(ctx, "POST", blobBatchPath, map[string]any{"blobs_base64": encoded}, &res); err != nil {
-		return nil, err
+		return nil, classifyHTTPError("SubmitBatch", err)
 	}
 
 	return &res, nil

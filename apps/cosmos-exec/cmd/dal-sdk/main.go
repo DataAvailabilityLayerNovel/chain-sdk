@@ -258,6 +258,51 @@ func main() {
 	_ = contractDeployCW20Cmd.MarkFlagRequired("wasm")
 	contractCmd.AddCommand(contractDeployCW20Cmd)
 
+	// ── Blob commands ──────────────────────────────────────────────────────
+	blobCmd := &cobra.Command{
+		Use:   "blob",
+		Short: "Blob store operations (submit, retrieve, batch, estimate-cost, demo)",
+	}
+	rootCmd.AddCommand(blobCmd)
+
+	blobSubmitCmd := &cobra.Command{
+		Use:   "submit",
+		Short: "Submit data to the blob store and print commitment",
+		RunE:  runBlobSubmit,
+	}
+	blobSubmitCmd.Flags().String("rpc", "http://127.0.0.1:50051", "cosmos-exec-grpc API URL")
+	blobSubmitCmd.Flags().String("data", "", "Inline data string")
+	blobSubmitCmd.Flags().String("file", "", "Path to data file")
+	blobCmd.AddCommand(blobSubmitCmd)
+
+	blobRetrieveCmd := &cobra.Command{
+		Use:   "retrieve --commitment <hex>",
+		Short: "Retrieve a blob by its SHA-256 commitment",
+		RunE:  runBlobRetrieve,
+	}
+	blobRetrieveCmd.Flags().String("rpc", "http://127.0.0.1:50051", "cosmos-exec-grpc API URL")
+	blobRetrieveCmd.Flags().String("commitment", "", "Blob commitment (hex)")
+	_ = blobRetrieveCmd.MarkFlagRequired("commitment")
+	blobCmd.AddCommand(blobRetrieveCmd)
+
+	blobEstimateCostCmd := &cobra.Command{
+		Use:   "estimate-cost --bytes <n>",
+		Short: "Compare gas cost of direct-tx vs blob+commit",
+		RunE:  runBlobEstimateCost,
+	}
+	blobEstimateCostCmd.Flags().Int("bytes", 0, "Data size in bytes")
+	blobEstimateCostCmd.Flags().Float64("gas-price", 0.002, "Celestia gas price (uTIA/gas)")
+	_ = blobEstimateCostCmd.MarkFlagRequired("bytes")
+	blobCmd.AddCommand(blobEstimateCostCmd)
+
+	blobDemoCmd := &cobra.Command{
+		Use:   "demo",
+		Short: "Run a full blob-first demo: submit → commit root → proof → verify → retrieve",
+		RunE:  runBlobDemo,
+	}
+	blobDemoCmd.Flags().String("rpc", "http://127.0.0.1:50051", "cosmos-exec-grpc API URL")
+	blobCmd.AddCommand(blobDemoCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -859,6 +904,176 @@ func printJSON(value any) error {
 
 	fmt.Println(string(encoded))
 	return nil
+}
+
+// ── Blob CLI handlers ─────────────────────────────────────────────────────
+
+func runBlobSubmit(cmd *cobra.Command, args []string) error {
+	rpc, _ := cmd.Flags().GetString("rpc")
+	dataStr, _ := cmd.Flags().GetString("data")
+	filePath, _ := cmd.Flags().GetString("file")
+
+	var data []byte
+	switch {
+	case strings.TrimSpace(dataStr) != "" && strings.TrimSpace(filePath) != "":
+		return fmt.Errorf("provide --data or --file, not both")
+	case strings.TrimSpace(dataStr) != "":
+		data = []byte(dataStr)
+	case strings.TrimSpace(filePath) != "":
+		var err error
+		data, err = os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("read file: %w", err)
+		}
+	default:
+		return fmt.Errorf("provide --data or --file")
+	}
+
+	client := cosmoswasm.NewClient(rpc)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	res, err := client.SubmitBlob(ctx, data)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("commitment=%s\n", res.Commitment)
+	fmt.Printf("size=%d\n", res.Size)
+	return nil
+}
+
+func runBlobRetrieve(cmd *cobra.Command, args []string) error {
+	rpc, _ := cmd.Flags().GetString("rpc")
+	commitment, _ := cmd.Flags().GetString("commitment")
+
+	client := cosmoswasm.NewClient(rpc)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	data, err := client.RetrieveBlobData(ctx, commitment)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("size=%d\n", len(data))
+	// Print as string if UTF-8 safe, otherwise hex.
+	if isPrintable(data) {
+		fmt.Printf("data=%s\n", string(data))
+	} else {
+		fmt.Printf("data_hex=%s\n", hex.EncodeToString(data))
+	}
+	return nil
+}
+
+func runBlobEstimateCost(cmd *cobra.Command, args []string) error {
+	dataBytes, _ := cmd.Flags().GetInt("bytes")
+	gasPrice, _ := cmd.Flags().GetFloat64("gas-price")
+
+	est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{
+		DataBytes:   dataBytes,
+		GasPriceTIA: gasPrice,
+	})
+
+	fmt.Printf("Data size:        %s\n", fmtBytes(est.DataBytes))
+	fmt.Printf("Compressed (est): %s\n", fmtBytes(est.CompressedBytes))
+	fmt.Println()
+	fmt.Printf("Direct on-chain:  %d gas  (%.6f TIA)\n", est.DirectTx.TotalGas, est.DirectTx.EstFeeTIA)
+	fmt.Printf("Blob + commit:    %d gas  (%.6f TIA)\n", est.BlobCommit.TotalGas, est.BlobCommit.EstFeeTIA)
+	fmt.Printf("Savings:          %.1f%%\n", est.SavingsPercent)
+	fmt.Printf("DA batches:       %d\n", est.NumBatches)
+	return nil
+}
+
+func runBlobDemo(cmd *cobra.Command, args []string) error {
+	rpc, _ := cmd.Flags().GetString("rpc")
+	client := cosmoswasm.NewClient(rpc)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fmt.Println("=== Blob-first full flow demo ===")
+	fmt.Println()
+
+	// 1. Submit individual blobs.
+	blobs := [][]byte{
+		[]byte(`{"event":"player_move","x":100,"y":200}`),
+		[]byte(`{"event":"score_update","player":"alice","score":9999}`),
+		[]byte(`{"event":"item_pickup","item":"shield","player":"bob"}`),
+	}
+
+	fmt.Printf("1. Submitting %d blobs to blob store...\n", len(blobs))
+	commitments := make([]string, len(blobs))
+	for i, blob := range blobs {
+		res, err := client.SubmitBlob(ctx, blob)
+		if err != nil {
+			return fmt.Errorf("submit blob[%d]: %w", i, err)
+		}
+		commitments[i] = res.Commitment
+		fmt.Printf("   blob[%d]: %d bytes → commitment=%s…\n", i, len(blob), res.Commitment[:16])
+	}
+
+	fmt.Println()
+	fmt.Println("2. Retrieving blob[0] by commitment...")
+	data, err := client.RetrieveBlobData(ctx, commitments[0])
+	if err != nil {
+		return fmt.Errorf("retrieve: %w", err)
+	}
+	fmt.Printf("   got %d bytes: %s\n", len(data), string(data))
+
+	fmt.Println()
+	fmt.Println("3. Building Merkle proof for blob[1]...")
+	proof, err := cosmoswasm.GetProof(commitments, 1)
+	if err != nil {
+		return fmt.Errorf("build proof: %w", err)
+	}
+	fmt.Printf("   root=%s…  leaf=%s…  path_len=%d\n",
+		proof.Root[:16], proof.Commitment[:16], len(proof.Path))
+
+	fmt.Println()
+	fmt.Println("4. Verifying proof...")
+	if err := cosmoswasm.VerifyMerkleProof(proof); err != nil {
+		return fmt.Errorf("verify failed: %w", err)
+	}
+	fmt.Println("   proof valid ✓")
+
+	fmt.Println()
+	fmt.Println("5. Cost estimate for 1 MB game state:")
+	est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: 1024 * 1024})
+	fmt.Printf("   direct: %d gas | blob+commit: %d gas | savings: %.0f%%\n",
+		est.DirectTx.TotalGas, est.BlobCommit.TotalGas, est.SavingsPercent)
+
+	fmt.Println()
+	fmt.Println("6. Compression demo:")
+	sample := []byte(strings.Repeat(`{"event":"tick","frame":1234,"data":"xxxxxxxxxx"}`, 50))
+	compressed, ok := cosmoswasm.CompressIfBeneficial(sample)
+	if ok {
+		fmt.Printf("   %d bytes → %d bytes (%.0f%% reduction)\n",
+			len(sample), len(compressed), (1-float64(len(compressed))/float64(len(sample)))*100)
+	}
+
+	fmt.Println()
+	fmt.Println("=== Demo complete ===")
+	return nil
+}
+
+func isPrintable(data []byte) bool {
+	for _, b := range data {
+		if b < 0x20 && b != '\n' && b != '\r' && b != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+func fmtBytes(b int) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%d MB", b/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%d KB", b/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 func buildProtoTxBytes(msgs ...sdk.Msg) ([]byte, error) {

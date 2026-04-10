@@ -170,15 +170,57 @@ func main() {
 			receipt2.Root[:12]+"…", len(snapshot), receipt2.TxHash)
 	}
 
+	// -------------------------------------------------------------------------
+	// Demo 5: Compression — show savings on structured data
+	// -------------------------------------------------------------------------
+	sampleEvent := makeEvent(0, 16)
+	samplePayload, _ := json.Marshal(sampleEvent)
+	compressed, didCompress := cosmoswasm.CompressIfBeneficial(samplePayload)
+	if didCompress {
+		fmt.Printf("\nCompression demo:\n")
+		fmt.Printf("  Original:   %d bytes\n", len(samplePayload))
+		fmt.Printf("  Compressed: %d bytes (%.0f%% reduction)\n",
+			len(compressed), (1-float64(len(compressed))/float64(len(samplePayload)))*100)
+		fmt.Println("  (BatchBuilder compresses by default — no extra code needed)")
+	}
+
+	// -------------------------------------------------------------------------
+	// Demo 6: EstimateCost — compare direct-tx vs blob+commit
+	// -------------------------------------------------------------------------
+	fmt.Println("\nCost comparison (EstimateCost):")
+	fmt.Printf("%-12s | %-14s | %-14s | %-10s\n", "Data Size", "Direct Gas", "Blob Gas", "Savings")
+	fmt.Println("-------------|----------------|----------------|----------")
+	for _, sz := range []int{1024, 100 * 1024, 1024 * 1024, 10 * 1024 * 1024} {
+		est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: sz})
+		label := formatBytes(sz)
+		fmt.Printf("%-12s | %14d | %14d | %9.1f%%\n",
+			label, est.DirectTx.TotalGas, est.BlobCommit.TotalGas, est.SavingsPercent)
+	}
+
+	// -------------------------------------------------------------------------
+	// Demo 7: Chunking — large blob automatically split
+	// -------------------------------------------------------------------------
+	largeBlob := makeSnapshot(1024 * 1024) // 1 MB
+	chunks, meta := cosmoswasm.ChunkBlob(largeBlob, cosmoswasm.DefaultMaxChunkSize)
+	fmt.Printf("\nChunking demo:\n")
+	fmt.Printf("  1 MB blob → %d chunks of ≤%d KB each\n", len(chunks), cosmoswasm.DefaultMaxChunkSize/1024)
+	if meta != nil {
+		reassembled, err := cosmoswasm.ReassembleChunks(chunks, meta)
+		if err != nil {
+			log.Printf("  reassemble error: %v", err)
+		} else {
+			fmt.Printf("  Reassembled: %d bytes, integrity ✓\n", len(reassembled))
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("Summary — what went on-chain vs off-chain:")
 	fmt.Println("  Off-chain (executor blob store): all event payloads + snapshots")
 	fmt.Println("  On-chain (WASM contract):        one 32-byte Merkle root per flush")
 	fmt.Println("  Proof:                           clients verify any event offline")
-	fmt.Println()
-	fmt.Println("Gas cost model:")
-	fmt.Println("  N events × S bytes  →  DA: N×S bytes (cheap)")
-	fmt.Println("  1 root per batch    →  WASM state: 32 bytes (minimal gas)")
+	fmt.Println("  Compression:                     enabled by default in BatchBuilder")
+	fmt.Println("  Chunking:                        auto-split blobs > 512 KB")
+	fmt.Println("  EstimateCost:                    compare gas before choosing strategy")
 
 	// Let auto-flush finish one final cycle before exit.
 	select {
@@ -202,6 +244,17 @@ func makeEvent(frame uint64, numPlayers int) GameEvent {
 		Frame:     frame,
 		Timestamp: time.Now().UnixMilli(),
 		Players:   players,
+	}
+}
+
+func formatBytes(b int) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%d MB", b/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%d KB", b/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
 	}
 }
 

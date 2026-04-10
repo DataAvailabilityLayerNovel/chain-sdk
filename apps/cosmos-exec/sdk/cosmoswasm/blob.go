@@ -23,7 +23,8 @@ import (
 //	client.SubmitTxBytes(ctx, tx)
 func (c *Client) SubmitBlob(ctx context.Context, data []byte) (*BlobSubmitResponse, error) {
 	if len(data) == 0 {
-		return nil, errors.New("blob data cannot be empty")
+		return nil, sdkErr("SubmitBlob", errors.New("blob data cannot be empty"),
+			"pass non-empty data; for large payloads use CommitRoot which handles compression+chunking automatically")
 	}
 
 	res := BlobSubmitResponse{}
@@ -35,11 +36,12 @@ func (c *Client) SubmitBlob(ctx context.Context, data []byte) (*BlobSubmitRespon
 		&res,
 	)
 	if err != nil {
-		return nil, err
+		return nil, classifyHTTPError("SubmitBlob", err)
 	}
 
 	if strings.TrimSpace(res.Commitment) == "" {
-		return nil, errors.New("blob submit response missing commitment")
+		return nil, sdkErr("SubmitBlob", errors.New("response missing commitment"),
+			"the executor returned an empty commitment — check executor logs")
 	}
 
 	return &res, nil
@@ -50,7 +52,8 @@ func (c *Client) SubmitBlob(ctx context.Context, data []byte) (*BlobSubmitRespon
 func (c *Client) RetrieveBlob(ctx context.Context, commitment string) (*BlobRetrieveResponse, error) {
 	commitment = strings.TrimSpace(commitment)
 	if commitment == "" {
-		return nil, errors.New("commitment is required")
+		return nil, sdkErr("RetrieveBlob", ErrCommitMissing,
+			"pass the hex commitment returned by SubmitBlob or CommitRoot")
 	}
 
 	query := url.Values{}
@@ -59,7 +62,7 @@ func (c *Client) RetrieveBlob(ctx context.Context, commitment string) (*BlobRetr
 	res := BlobRetrieveResponse{}
 	err := c.doJSON(ctx, "GET", blobRetrievePath+"?"+query.Encode(), nil, &res)
 	if err != nil {
-		return nil, err
+		return nil, classifyHTTPError("RetrieveBlob", err)
 	}
 
 	return &res, nil

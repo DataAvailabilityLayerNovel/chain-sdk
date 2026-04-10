@@ -18,6 +18,7 @@ import (
 
 	"github.com/evstack/ev-node/apps/cosmos-exec/app"
 	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
+	cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 	execgrpc "github.com/evstack/ev-node/execution/grpc"
 )
 
@@ -49,6 +50,7 @@ func main() {
 		mux.HandleFunc("/blob/submit", blobSubmitHandler(cosmosExecutor))
 		mux.HandleFunc("/blob/retrieve", blobRetrieveHandler(cosmosExecutor))
 		mux.HandleFunc("/blob/batch", blobBatchHandler(cosmosExecutor))
+		mux.HandleFunc("/blob/estimate-cost", blobEstimateCostHandler())
 	})
 
 	srv := &http.Server{
@@ -371,6 +373,46 @@ func blobRetrieveHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			DataBase64: base64.StdEncoding.EncodeToString(data),
 			Size:       len(data),
 		})
+	}
+}
+
+type estimateCostRequest struct {
+	DataBytes   int     `json:"data_bytes"`
+	GasPriceTIA float64 `json:"gas_price_tia,omitempty"`
+	MaxBlobSize int     `json:"max_blob_size,omitempty"`
+}
+
+func blobEstimateCostHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+
+		var req estimateCostRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		if req.DataBytes <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_bytes must be > 0"})
+			return
+		}
+
+		est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{
+			DataBytes:   req.DataBytes,
+			GasPriceTIA: req.GasPriceTIA,
+			MaxBlobSize: req.MaxBlobSize,
+		})
+
+		writeJSON(w, http.StatusOK, est)
 	}
 }
 
