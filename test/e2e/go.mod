@@ -5,16 +5,16 @@ go 1.25.6
 require (
 	cosmossdk.io/math v1.5.3
 	github.com/celestiaorg/go-square/v3 v3.0.2
-	github.com/celestiaorg/tastora v0.16.1-0.20260302131806-2816c7b82bfb
+	github.com/celestiaorg/tastora v0.17.0
 	github.com/cosmos/cosmos-sdk v0.53.6
 	github.com/cosmos/ibc-go/v8 v8.8.0
-	github.com/ethereum/go-ethereum v1.17.1
+	github.com/ethereum/go-ethereum v1.17.2
 	github.com/evstack/ev-node v1.0.0
 	github.com/evstack/ev-node/execution/evm v0.0.0-20250602130019-2a732cf903a5
 	github.com/evstack/ev-node/execution/evm/test v0.0.0-00010101000000-000000000000
 	github.com/libp2p/go-libp2p v0.47.0
 	github.com/prometheus/client_model v0.6.2
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/proto/otlp v1.10.0
 	go.uber.org/zap v1.27.1
@@ -74,8 +74,9 @@ require (
 	github.com/cockroachdb/pebble v1.1.5 // indirect
 	github.com/cockroachdb/redact v1.1.6 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
-	github.com/cometbft/cometbft v0.38.21 // indirect
+	github.com/cometbft/cometbft v1.0.1 // indirect
 	github.com/cometbft/cometbft-db v1.0.4 // indirect
+	github.com/cometbft/cometbft/api v1.0.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.2 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/cosmos/btcutil v1.0.5 // indirect
@@ -88,7 +89,7 @@ require (
 	github.com/cosmos/ibc-go/modules/capability v1.0.1 // indirect
 	github.com/cosmos/ics23/go v0.11.0 // indirect
 	github.com/cosmos/ledger-cosmos-go v1.0.0 // indirect
-	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
+	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
 	github.com/danieljoos/wincred v1.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
@@ -284,12 +285,12 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
-	go.opentelemetry.io/otel v1.42.0 // indirect
+	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.42.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.42.0 // indirect
-	go.opentelemetry.io/otel/metric v1.42.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.42.0 // indirect
-	go.opentelemetry.io/otel/trace v1.42.0 // indirect
+	go.opentelemetry.io/otel/metric v1.43.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
+	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/fx v1.24.0 // indirect
 	go.uber.org/mock v0.6.0 // indirect
