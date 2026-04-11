@@ -39,6 +39,7 @@ func newHTTP2Client() *http.Client {
 		},
 	}
 }
+
 // NewClient creates a new gRPC execution client.
 //
 // Parameters:

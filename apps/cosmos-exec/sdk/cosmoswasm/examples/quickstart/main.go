@@ -1,18 +1,19 @@
 // Quickstart — copy-paste this file and run in under 5 minutes.
 //
 // Prerequisites:
-//   1. Start the executor:
-//      go run ./apps/cosmos-exec/cmd/cosmos-exec-grpc --in-memory
 //
-//   2. Run this example:
-//      go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/quickstart/main.go
+//  1. Start the executor:
+//     go run ./apps/cosmos-exec/cmd/cosmos-exec-grpc --in-memory
+//
+//  2. Run this example:
+//     go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/quickstart/main.go
 //
 // What it does (no WASM contract needed):
-//   • Submits 3 blobs to the blob store
-//   • Retrieves one by commitment
-//   • Builds + verifies a Merkle proof
-//   • Prints a cost estimate
-//   • Shows compression savings
+//   - Submits 3 blobs to the blob store
+//   - Retrieves one by commitment
+//   - Builds + verifies a Merkle proof
+//   - Prints a cost estimate
+//   - Shows compression savings
 package main
 
 import (
