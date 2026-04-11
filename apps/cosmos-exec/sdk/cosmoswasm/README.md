@@ -8,9 +8,11 @@ SDK `cosmoswasm` dùng để:
 
 Package:
 
-`github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm`
+`github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm`
+
 
 ---
+
 
 ### ⚡ Quick Note: CLI Alternative
 
@@ -36,12 +38,10 @@ go build -o dal-sdk ./cmd/dal-sdk
 ./dal-sdk tx result --hash <tx_hash> --rpc http://127.0.0.1:50051
 ```
 
----
-
 ## 1) Cài đặt
 
 ```bash
-go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
 ```
 
 ## 2) Yêu cầu trước khi chạy
@@ -281,7 +281,7 @@ package main
 
 import (
 	"context"
-	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 func main() {
@@ -319,10 +319,10 @@ Nếu đã có Go project (service BE, API gateway):
 
 ```bash
 # Thêm dependency vào go.mod
-go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
 
 # Dùng trong code hiện tại
-import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 
 // Tích hợp vào luồng app
 func deployContractHandler(w http.ResponseWriter, r *http.Request) {
@@ -345,13 +345,13 @@ func deployContractHandler(w http.ResponseWriter, r *http.Request) {
 
 1. **Nếu import từ EVNode repo (dev):**
    ```go
-   import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
    ```
-   - Require: `go.mod` có `require github.com/evstack/ev-node v0.x.x`
+	- Require: `go.mod` có `require github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec v0.x.x`
 
 2. **Nếu publish lên GitHub (production):**
    ```go
-   import "github.com/DataAvailabilityLayerNovel/chain-sdk/cosmoswasm"
+	import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
    ```
    - (Cần setup `go.mod` ở chain-sdk repo riêng)
 

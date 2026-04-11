@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evstack/ev-node/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 )
 
 // mockExecutor is a mock implementation of execution.Executor for testing
@@ -89,7 +89,6 @@ func TestClient_InitChain(t *testing.T) {
 	}
 
 	// Start test server
-	handler := NewExecutorServiceHandler(mockExec)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 

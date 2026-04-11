@@ -1,20 +1,23 @@
-module github.com/evstack/ev-node/apps/cosmos-exec
+module github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec
 
 go 1.25.6
 
 replace (
-	github.com/evstack/ev-node => ../../
-	github.com/evstack/ev-node/core => ../../core
-	github.com/evstack/ev-node/execution/grpc => ../../execution/grpc
+	github.com/DataAvailabilityLayerNovel/chain-sdk => ../../
+	github.com/DataAvailabilityLayerNovel/chain-sdk/core => ../../core
+	github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc => ../../execution/grpc
 )
 
 require (
 	github.com/CosmWasm/wasmd v0.45.0
+	github.com/DataAvailabilityLayerNovel/chain-sdk/core v1.0.0
+	github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc v1.0.0-rc.1
 	github.com/cometbft/cometbft v0.37.5
 	github.com/cometbft/cometbft-db v0.8.0
 	github.com/cosmos/cosmos-sdk v0.47.15
-	github.com/evstack/ev-node/core v1.0.0
-	github.com/evstack/ev-node/execution/grpc v1.0.0-rc.1
+	github.com/cosmos/gogoproto v1.7.0
+	github.com/cosmos/ibc-go/v7 v7.3.0
+	github.com/spf13/cobra v1.10.2
 )
 
 replace github.com/btcsuite/btcd/btcec/v2 => github.com/btcsuite/btcd/btcec/v2 v2.3.2
@@ -38,6 +41,7 @@ require (
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/ChainSafe/go-schnorrkel v1.1.0 // indirect
 	github.com/CosmWasm/wasmvm v1.5.0 // indirect
+	github.com/DataAvailabilityLayerNovel/chain-sdk v1.0.0 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/aws/aws-sdk-go v1.44.203 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -57,9 +61,7 @@ require (
 	github.com/cosmos/cosmos-proto v1.0.0-beta.5 // indirect
 	github.com/cosmos/go-bip39 v1.0.0 // indirect
 	github.com/cosmos/gogogateway v1.2.0 // indirect
-	github.com/cosmos/gogoproto v1.7.0 // indirect
 	github.com/cosmos/iavl v0.20.1 // indirect
-	github.com/cosmos/ibc-go/v7 v7.3.0 // indirect
 	github.com/cosmos/ics23/go v0.10.0 // indirect
 	github.com/cosmos/ledger-cosmos-go v0.12.4 // indirect
 	github.com/cosmos/rosetta-sdk-go v0.10.0 // indirect
@@ -155,7 +157,6 @@ require (
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect

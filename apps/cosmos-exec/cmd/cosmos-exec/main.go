@@ -12,7 +12,7 @@ import (
 	abciserver "github.com/cometbft/cometbft/abci/server"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 )
 
 func main() {

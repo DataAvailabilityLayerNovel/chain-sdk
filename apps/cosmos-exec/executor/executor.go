@@ -13,8 +13,8 @@ import (
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/app"
-	"github.com/evstack/ev-node/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 )
 
 var _ execution.Executor = (*CosmosExecutor)(nil)

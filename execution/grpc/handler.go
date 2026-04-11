@@ -9,8 +9,8 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	"github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 // NewExecutorServiceHandler creates a new HTTP handler for the ExecutorService.

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 func main() {

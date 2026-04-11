@@ -12,9 +12,9 @@ import (
 	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/evstack/ev-node/core/execution"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
-	"github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 // Ensure Client implements the execution.Executor interface
@@ -39,7 +39,6 @@ func newHTTP2Client() *http.Client {
 		},
 	}
 }
-
 // NewClient creates a new gRPC execution client.
 //
 // Parameters:
