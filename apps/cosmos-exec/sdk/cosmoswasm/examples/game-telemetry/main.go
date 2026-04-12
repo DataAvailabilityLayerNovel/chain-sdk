@@ -4,12 +4,21 @@
 // player moves, scores) cheaply:
 //
 //   - Large event frames → executor blob store (off WASM state, ~free)
-//   - One Merkle root per flush → WASM contract (on-chain, minimal gas)
+//   - One Merkle root per batch → verifiable off-chain
 //   - Per-frame Merkle proofs → clients can verify any event without replaying all
 //
-// Run (requires cosmos-wasm nodes running at defaults):
+// Run (requires cosmos-exec-grpc running):
 //
-//	go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/game-telemetry/main.go
+//	# Terminal 1:
+//	cd apps/cosmos-exec && go run ./cmd/cosmos-exec-grpc --in-memory
+//
+//	# Terminal 2:
+//	cd apps/cosmos-exec && go run ./sdk/cosmoswasm/examples/game-telemetry
+//
+// Or with full E2E stack:
+//
+//	go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
+//	cd apps/cosmos-exec && go run ./sdk/cosmoswasm/examples/game-telemetry
 package main
 
 import (
@@ -39,9 +48,6 @@ type PlayerUpdate struct {
 	Score int     `json:"score"`
 }
 
-// stubContractAddr is a placeholder — replace with your deployed contract address.
-const stubContractAddr = "cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs"
-
 func main() {
 	execURL := os.Getenv("EXEC_URL")
 	if execURL == "" {
@@ -54,121 +60,86 @@ func main() {
 	defer stop()
 
 	// -------------------------------------------------------------------------
-	// Demo 1: BatchBuilder — accumulate game events, auto-flush every 5 s or 3 MB
+	// Demo 1: Batch submit — accumulate 20 game events, submit as one batch
 	// -------------------------------------------------------------------------
-	bb := cosmoswasm.NewBatchBuilder(client, cosmoswasm.BatchBuilderConfig{
-		Contract: stubContractAddr,
-		Tag:      "game-events",
-		MaxBytes: cosmoswasm.DefaultBatchMaxBytes,
-	})
+	log.Println("Demo 1 — Batch submit: 20 game events")
 
-	flushCh := bb.StartAutoFlush(ctx, 5*time.Second)
-
-	// Print flush results in the background.
-	go func() {
-		for result := range flushCh {
-			if result.Err != nil {
-				log.Printf("[batch] flush error: %v", result.Err)
-				continue
-			}
-			if result.Receipt != nil {
-				log.Printf("[batch] flushed root=%s blobs=%d txHash=%s",
-					result.Receipt.Root[:12]+"…", len(result.Receipt.Refs), result.Receipt.TxHash)
-			}
-		}
-	}()
-
-	// Emit 20 game events into the batch builder.
-	log.Println("Emitting 20 game events into BatchBuilder…")
+	blobs := make([][]byte, 20)
 	for i := range 20 {
 		event := makeEvent(uint64(i), 8)
 		payload, err := json.Marshal(event)
 		if err != nil {
 			log.Fatalf("marshal event: %v", err)
 		}
-
-		// Add returns a receipt only when it triggered a size-based flush.
-		receipt, err := bb.Add(ctx, payload, func(ctx context.Context, blobs [][]byte) (*cosmoswasm.CommitReceipt, error) {
-			return client.CommitRoot(ctx, cosmoswasm.CommitRootRequest{
-				Blobs:    blobs,
-				Contract: stubContractAddr,
-				Tag:      "game-events",
-			})
-		})
-		if err != nil {
-			// In a real game server you would handle/retry; here we log and continue.
-			log.Printf("[batch] add error (frame %d): %v — is the executor running?", i, err)
-			continue
-		}
-		if receipt != nil {
-			log.Printf("[batch] size-flush at frame %d: root=%s", i, receipt.Root[:12]+"…")
+		// Compress if beneficial (default BatchBuilder behavior).
+		if compressed, ok := cosmoswasm.CompressIfBeneficial(payload); ok {
+			blobs[i] = compressed
+		} else {
+			blobs[i] = payload
 		}
 	}
 
+	batchRes, err := client.SubmitBatch(ctx, blobs)
+	if err != nil {
+		log.Fatalf("[batch] submit error (is executor running?): %v", err)
+	}
+	log.Printf("[batch] root=%s blobs=%d", batchRes.Root[:16]+"…", batchRes.Count)
+
 	// -------------------------------------------------------------------------
-	// Demo 2: CommitCritical — important event submitted immediately
+	// Demo 2: Critical event — submit single blob immediately
 	// -------------------------------------------------------------------------
 	criticalEvent := makeEvent(9999, 4)
 	criticalEvent.Players[0].Score = 1_000_000 // record-breaking score
 	payload, _ := json.Marshal(criticalEvent)
 
-	log.Println("Submitting critical event (purchase / record score) immediately…")
-	receipt, err := client.CommitCritical(ctx, cosmoswasm.CommitRootRequest{
-		Blobs:    [][]byte{payload},
-		Contract: stubContractAddr,
-		Tag:      "critical-score",
-	})
+	log.Println("\nDemo 2 — Critical event: single blob submit")
+	criticalRes, err := client.SubmitBlob(ctx, payload)
 	if err != nil {
-		log.Printf("[critical] error (is executor running?): %v", err)
-	} else {
-		log.Printf("[critical] committed root=%s txHash=%s", receipt.Root[:12]+"…", receipt.TxHash)
-
-		// -------------------------------------------------------------------------
-		// Demo 3: Merkle proof — prove a specific event is in a batch
-		// -------------------------------------------------------------------------
-		if len(receipt.Refs) > 0 {
-			commitments := make([]string, len(receipt.Refs))
-			for i, r := range receipt.Refs {
-				commitments[i] = r.Commitment
-			}
-
-			proof, err := cosmoswasm.GetProof(commitments, 0)
-			if err != nil {
-				log.Printf("[proof] build error: %v", err)
-			} else {
-				if err := cosmoswasm.VerifyMerkleProof(proof); err != nil {
-					log.Printf("[proof] INVALID: %v", err)
-				} else {
-					log.Printf("[proof] ✓ verified leaf[0]=%s in root=%s", proof.Commitment[:12]+"…", proof.Root[:12]+"…")
-				}
-
-				// Demonstrate retrieval by commitment.
-				data, err := client.RetrieveBlobData(ctx, proof.Commitment)
-				if err != nil {
-					log.Printf("[retrieve] error: %v", err)
-				} else {
-					log.Printf("[retrieve] ✓ got %d bytes for commitment %s", len(data), proof.Commitment[:12]+"…")
-				}
-			}
-		}
+		log.Fatalf("[critical] error (is executor running?): %v", err)
 	}
+	log.Printf("[critical] commitment=%s size=%d bytes", criticalRes.Commitment[:16]+"…", criticalRes.Size)
 
 	// -------------------------------------------------------------------------
-	// Demo 4: Single large snapshot (CommitRoot with one big blob)
+	// Demo 3: Merkle proof — prove a specific event is in the batch
 	// -------------------------------------------------------------------------
-	log.Println("Committing large game-state snapshot (512 KB)…")
+	log.Println("\nDemo 3 — Merkle proof for event[5] in batch")
+	proof, err := cosmoswasm.GetProof(batchRes.Commitments, 5)
+	if err != nil {
+		log.Fatalf("[proof] build error: %v", err)
+	}
+	if err := cosmoswasm.VerifyMerkleProof(proof); err != nil {
+		log.Fatalf("[proof] INVALID: %v", err)
+	}
+	log.Printf("[proof] ✓ verified leaf[5]=%s in root=%s", proof.Commitment[:16]+"…", proof.Root[:16]+"…")
+
+	// Retrieve the blob to confirm data integrity.
+	data, err := client.RetrieveBlobData(ctx, proof.Commitment)
+	if err != nil {
+		log.Fatalf("[retrieve] error: %v", err)
+	}
+	// Decompress if needed.
+	if decompressed, err := cosmoswasm.MaybeDecompress(data); err == nil {
+		data = decompressed
+	}
+	log.Printf("[retrieve] ✓ got %d bytes for commitment %s", len(data), proof.Commitment[:16]+"…")
+
+	// -------------------------------------------------------------------------
+	// Demo 4: Large snapshot — single 512 KB blob
+	// -------------------------------------------------------------------------
+	log.Println("\nDemo 4 — Large snapshot: 512 KB blob")
 	snapshot := makeSnapshot(512 * 1024)
-	receipt2, err := client.CommitRoot(ctx, cosmoswasm.CommitRootRequest{
-		Blobs:    [][]byte{snapshot},
-		Contract: stubContractAddr,
-		Tag:      "snapshot",
-	})
+	snapshotRes, err := client.SubmitBlob(ctx, snapshot)
 	if err != nil {
-		log.Printf("[snapshot] error (is executor running?): %v", err)
-	} else {
-		log.Printf("[snapshot] committed root=%s size=%d bytes txHash=%s",
-			receipt2.Root[:12]+"…", len(snapshot), receipt2.TxHash)
+		log.Fatalf("[snapshot] error: %v", err)
 	}
+	log.Printf("[snapshot] commitment=%s size=%d bytes", snapshotRes.Commitment[:16]+"…", snapshotRes.Size)
+
+	// Verify round-trip.
+	retrieved, err := client.RetrieveBlobData(ctx, snapshotRes.Commitment)
+	if err != nil {
+		log.Fatalf("[snapshot] retrieve error: %v", err)
+	}
+	log.Printf("[snapshot] ✓ round-trip verified: %d bytes", len(retrieved))
 
 	// -------------------------------------------------------------------------
 	// Demo 5: Compression — show savings on structured data
@@ -177,17 +148,16 @@ func main() {
 	samplePayload, _ := json.Marshal(sampleEvent)
 	compressed, didCompress := cosmoswasm.CompressIfBeneficial(samplePayload)
 	if didCompress {
-		fmt.Printf("\nCompression demo:\n")
+		fmt.Printf("\nDemo 5 — Compression:\n")
 		fmt.Printf("  Original:   %d bytes\n", len(samplePayload))
 		fmt.Printf("  Compressed: %d bytes (%.0f%% reduction)\n",
 			len(compressed), (1-float64(len(compressed))/float64(len(samplePayload)))*100)
-		fmt.Println("  (BatchBuilder compresses by default — no extra code needed)")
 	}
 
 	// -------------------------------------------------------------------------
 	// Demo 6: EstimateCost — compare direct-tx vs blob+commit
 	// -------------------------------------------------------------------------
-	fmt.Println("\nCost comparison (EstimateCost):")
+	fmt.Println("\nDemo 6 — Cost comparison (EstimateCost):")
 	fmt.Printf("%-12s | %-14s | %-14s | %-10s\n", "Data Size", "Direct Gas", "Blob Gas", "Savings")
 	fmt.Println("-------------|----------------|----------------|----------")
 	for _, sz := range []int{1024, 100 * 1024, 1024 * 1024, 10 * 1024 * 1024} {
@@ -202,7 +172,7 @@ func main() {
 	// -------------------------------------------------------------------------
 	largeBlob := makeSnapshot(1024 * 1024) // 1 MB
 	chunks, meta := cosmoswasm.ChunkBlob(largeBlob, cosmoswasm.DefaultMaxChunkSize)
-	fmt.Printf("\nChunking demo:\n")
+	fmt.Printf("\nDemo 7 — Chunking:\n")
 	fmt.Printf("  1 MB blob → %d chunks of ≤%d KB each\n", len(chunks), cosmoswasm.DefaultMaxChunkSize/1024)
 	if meta != nil {
 		reassembled, err := cosmoswasm.ReassembleChunks(chunks, meta)
@@ -214,19 +184,16 @@ func main() {
 	}
 
 	fmt.Println()
-	fmt.Println("Summary — what went on-chain vs off-chain:")
-	fmt.Println("  Off-chain (executor blob store): all event payloads + snapshots")
-	fmt.Println("  On-chain (WASM contract):        one 32-byte Merkle root per flush")
-	fmt.Println("  Proof:                           clients verify any event offline")
-	fmt.Println("  Compression:                     enabled by default in BatchBuilder")
-	fmt.Println("  Chunking:                        auto-split blobs > 512 KB")
-	fmt.Println("  EstimateCost:                    compare gas before choosing strategy")
-
-	// Let auto-flush finish one final cycle before exit.
-	select {
-	case <-time.After(6 * time.Second):
-	case <-ctx.Done():
-	}
+	fmt.Println("Summary — what this demo shows:")
+	fmt.Println("  Blob store:    20 events + 1 critical + 1 snapshot stored off-chain")
+	fmt.Printf("  Merkle root:   %s… (verifiable batch of 20)\n", batchRes.Root[:16])
+	fmt.Println("  Proof:         any event verifiable offline without replaying all")
+	fmt.Println("  Compression:   enabled by default (50-70% for JSON)")
+	fmt.Println("  Chunking:      auto-split blobs > 512 KB")
+	fmt.Println("  EstimateCost:  compare gas before choosing strategy")
+	fmt.Println()
+	fmt.Println("To record roots on-chain, deploy a contract with record_batch handler.")
+	fmt.Println("See: examples/deploy-contract")
 }
 
 // makeEvent builds a fake game event with numPlayers player updates.

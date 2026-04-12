@@ -181,8 +181,25 @@ func TestCosmosExecutorExecuteTxsWasmLifecycle(t *testing.T) {
 		t.Fatalf("build execute tx failed: %v", err)
 	}
 
-	if _, err := exec.ExecuteTxs(ctx, [][]byte{executeTx}, 3, time.Now(), stateRoot2); err == nil {
-		t.Fatal("expected execute tx with invalid contract address to fail")
+	stateRoot3, err := exec.ExecuteTxs(ctx, [][]byte{executeTx}, 3, time.Now(), stateRoot2)
+	if err != nil {
+		t.Fatalf("execute txs should not fail on invalid contract (block continues): %v", err)
+	}
+	if len(stateRoot3) == 0 {
+		t.Fatal("state root is empty after block with failed tx")
+	}
+
+	// The tx should be recorded with a non-zero code.
+	txHash := hashTx(executeTx)
+	result, found, err := exec.GetTxResult(ctx, txHash)
+	if err != nil {
+		t.Fatalf("get tx result failed: %v", err)
+	}
+	if !found {
+		t.Fatal("expected failed tx to be recorded")
+	}
+	if result.Code == 0 {
+		t.Fatal("expected non-zero result code for invalid contract execute")
 	}
 }
 

@@ -742,7 +742,16 @@ func loadDotEnv(path string) error {
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
-		value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+		rawValue := strings.TrimSpace(parts[1])
+		value := ""
+		if strings.HasPrefix(rawValue, "\"") || strings.HasPrefix(rawValue, "'") {
+			value = strings.Trim(rawValue, "\"'")
+		} else {
+			if idx := strings.Index(rawValue, "#"); idx >= 0 {
+				rawValue = strings.TrimSpace(rawValue[:idx])
+			}
+			value = strings.TrimSpace(rawValue)
+		}
 		if key == "" {
 			continue
 		}
@@ -756,8 +765,9 @@ func loadDotEnv(path string) error {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""

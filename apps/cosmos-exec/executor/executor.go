@@ -32,11 +32,28 @@ type CosmosExecutor struct {
 
 	mempool   [][]byte
 	txResults map[string]TxExecutionResult
+	blocks    map[uint64]BlockInfo
 
 	// blobStore holds large data blobs off WASM contract state.
 	// Callers store the returned commitment (32-byte SHA-256 hex) on-chain
 	// via a WASM message, keeping gas costs minimal.
 	blobStore *BlobStore
+}
+
+type BlockInfo struct {
+	Height  uint64 `json:"height"`
+	Time    string `json:"time"`
+	AppHash string `json:"app_hash"`
+	NumTxs  int    `json:"num_txs"`
+}
+
+type StatusInfo struct {
+	Initialized     bool   `json:"initialized"`
+	ChainID         string `json:"chain_id"`
+	LatestHeight    uint64 `json:"latest_height"`
+	FinalizedHeight uint64 `json:"finalized_height"`
+	Healthy         bool   `json:"healthy"`
+	Synced          bool   `json:"synced"`
 }
 
 type TxEventAttribute struct {
@@ -62,6 +79,7 @@ func New(appInstance *app.App) *CosmosExecutor {
 		app:       appInstance,
 		mempool:   make([][]byte, 0, 1024),
 		txResults: make(map[string]TxExecutionResult),
+		blocks:    make(map[uint64]BlockInfo),
 		blobStore: NewBlobStore(),
 	}
 }
@@ -205,10 +223,6 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 			Log:    deliverResp.Log,
 			Events: toEvents(deliverResp.Events),
 		}
-
-		if deliverResp.Code != 0 {
-			return nil, fmt.Errorf("deliver tx failed at height %d: code=%d log=%s", blockHeight, deliverResp.Code, deliverResp.Log)
-		}
 	}
 
 	e.app.EndBlock(abci.RequestEndBlock{Height: int64(blockHeight)})
@@ -216,6 +230,13 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 
 	e.stateRoot = append([]byte(nil), commitResp.Data...)
 	e.lastHeight = blockHeight
+
+	e.blocks[blockHeight] = BlockInfo{
+		Height:  blockHeight,
+		Time:    timestamp.UTC().Format(time.RFC3339),
+		AppHash: fmt.Sprintf("%x", commitResp.Data),
+		NumTxs:  len(txs),
+	}
 
 	return append([]byte(nil), e.stateRoot...), nil
 }
@@ -253,7 +274,7 @@ func (e *CosmosExecutor) GetTxResult(ctx context.Context, hash string) (TxExecut
 	return result, true, nil
 }
 
-func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryMsg []byte) ([]byte, error) {
+func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryMsg []byte) (result []byte, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -272,6 +293,14 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Recover from panics in WASM execution (e.g. out-of-gas, store access).
+	defer func() {
+		if r := recover(); r != nil {
+			result = nil
+			err = fmt.Errorf("wasm query panicked: %v", r)
+		}
+	}()
+
 	height := e.lastHeight
 
 	if height == 0 {
@@ -283,12 +312,15 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 		Time:   time.Now(),
 	})
 
-	result, err := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
-	if err != nil {
-		return nil, err
+	// Set a gas limit to prevent unbounded WASM queries from panicking with out-of-gas.
+	queryCtx = queryCtx.WithGasMeter(sdk.NewGasMeter(50_000_000))
+
+	queryResult, queryErr := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
+	if queryErr != nil {
+		return nil, queryErr
 	}
 
-	return append([]byte(nil), result...), nil
+	return append([]byte(nil), queryResult...), nil
 }
 
 func (e *CosmosExecutor) SetFinal(ctx context.Context, blockHeight uint64) error {
@@ -342,6 +374,67 @@ func (e *CosmosExecutor) FilterTxs(ctx context.Context, txs [][]byte, maxBytes, 
 	}
 
 	return statuses, nil
+}
+
+// GetLatestBlock returns the most recently executed block info.
+func (e *CosmosExecutor) GetLatestBlock(ctx context.Context) (BlockInfo, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return BlockInfo{}, false, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.lastHeight == 0 {
+		return BlockInfo{}, false, nil
+	}
+
+	info, ok := e.blocks[e.lastHeight]
+	return info, ok, nil
+}
+
+// GetBlock returns block info at a specific height.
+func (e *CosmosExecutor) GetBlock(ctx context.Context, height uint64) (BlockInfo, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return BlockInfo{}, false, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	info, ok := e.blocks[height]
+	return info, ok, nil
+}
+
+// GetStatus returns the current executor status.
+func (e *CosmosExecutor) GetStatus(ctx context.Context) (StatusInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return StatusInfo{}, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return StatusInfo{
+		Initialized:     e.initialized,
+		ChainID:         e.chainID,
+		LatestHeight:    e.lastHeight,
+		FinalizedHeight: e.finalizedHeight,
+		Healthy:         true,
+		Synced:          e.finalizedHeight >= e.lastHeight || e.lastHeight == 0,
+	}, nil
+}
+
+// GetPendingTxCount returns the number of transactions in the mempool.
+func (e *CosmosExecutor) GetPendingTxCount(ctx context.Context) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return len(e.mempool), nil
 }
 
 func bytesEqual(a, b []byte) bool {

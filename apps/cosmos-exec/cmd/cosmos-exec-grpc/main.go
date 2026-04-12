@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	db "github.com/cometbft/cometbft-db"
@@ -51,6 +52,13 @@ func main() {
 		mux.HandleFunc("/blob/retrieve", blobRetrieveHandler(cosmosExecutor))
 		mux.HandleFunc("/blob/batch", blobBatchHandler(cosmosExecutor))
 		mux.HandleFunc("/blob/estimate-cost", blobEstimateCostHandler())
+		mux.HandleFunc("/blocks/latest", blocksLatestHandler(cosmosExecutor))
+		mux.HandleFunc("/blocks/{height}", blockByHeightHandler(cosmosExecutor))
+		mux.HandleFunc("/status", statusHandler(cosmosExecutor))
+		mux.HandleFunc("/tx/pending", txPendingHandler(cosmosExecutor))
+		mux.HandleFunc("/tx/{hash}", txByHashHandler(cosmosExecutor))
+		mux.HandleFunc("/swagger", swaggerUIHandler())
+		mux.HandleFunc("/swagger.json", swaggerJSONHandler())
 	})
 
 	srv := &http.Server{
@@ -169,6 +177,12 @@ type querySmartRequest struct {
 
 func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("query panicked: %v", rec)})
+			}
+		}()
+
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 			return
@@ -413,6 +427,134 @@ func blobEstimateCostHandler() http.HandlerFunc {
 		})
 
 		writeJSON(w, http.StatusOK, est)
+	}
+}
+
+func blocksLatestHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		block, found, err := exec.GetLatestBlock(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusOK, map[string]any{"found": false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, block)
+	}
+}
+
+func blockByHeightHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		heightStr := r.PathValue("height")
+		height, err := strconv.ParseUint(heightStr, 10, 64)
+		if err != nil || height == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid block height"})
+			return
+		}
+
+		block, found, err := exec.GetBlock(r.Context(), height)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("block %d not found", height)})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, block)
+	}
+}
+
+func statusHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		status, err := exec.GetStatus(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, status)
+	}
+}
+
+func txPendingHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		count, err := exec.GetPendingTxCount(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"pending_count": count})
+	}
+}
+
+func txByHashHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		hash := strings.TrimSpace(r.PathValue("hash"))
+		if hash == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash is required"})
+			return
+		}
+
+		result, found, err := exec.GetTxResult(r.Context(), hash)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		if !found {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"hash":   hash,
+				"status": "pending",
+				"found":  false,
+			})
+			return
+		}
+
+		status := "success"
+		if result.Code != 0 {
+			status = "failed"
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"hash":   result.Hash,
+			"status": status,
+			"found":  true,
+			"height": result.Height,
+			"code":   result.Code,
+			"log":    result.Log,
+			"events": result.Events,
+		})
 	}
 }
 
