@@ -41,7 +41,7 @@ type FlushFunc func(ctx context.Context, blobs [][]byte) (*CommitReceipt, error)
 //	bb.Add(eventBytes)
 type BatchBuilder struct {
 	mu         sync.Mutex
-	client     *Client
+	client     ExecutorClient
 	config     BatchBuilderConfig
 	blobs      [][]byte
 	totalBytes int
@@ -75,7 +75,7 @@ type BatchBuilderConfig struct {
 
 // NewBatchBuilder creates a BatchBuilder backed by client.
 // Compression is enabled by default; set Compress to ptr(false) to disable.
-func NewBatchBuilder(client *Client, cfg BatchBuilderConfig) *BatchBuilder {
+func NewBatchBuilder(client ExecutorClient, cfg BatchBuilderConfig) *BatchBuilder {
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = DefaultBatchMaxBytes
 	}

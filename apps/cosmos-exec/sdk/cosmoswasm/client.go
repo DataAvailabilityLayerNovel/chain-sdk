@@ -31,7 +31,7 @@ type apiError struct {
 func NewClient(baseURL string) *Client {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if trimmed == "" {
-		trimmed = defaultExecAPIURL
+		trimmed = DefaultExecAPIURL
 	}
 
 	return &Client{
@@ -186,20 +186,59 @@ func (c *Client) QuerySmart(ctx context.Context, contract string, msg any) (map[
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, reqBody any, out any) error {
-	var body io.Reader
+	var payload []byte
 	if reqBody != nil {
-		payload, err := json.Marshal(reqBody)
+		var err error
+		payload, err = json.Marshal(reqBody)
 		if err != nil {
 			return fmt.Errorf("marshal request body: %w", err)
 		}
-		body = bytes.NewReader(payload)
 	}
 
+	var lastErr error
+	attempts := 1 + c.retryMax
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(c.retryDelay):
+			}
+		}
+
+		var body io.Reader
+		if payload != nil {
+			body = bytes.NewReader(payload)
+		}
+
+		lastErr = c.doJSONOnce(ctx, method, path, body, out)
+		if lastErr == nil {
+			return nil
+		}
+
+		// Only retry on transient errors (connection refused, timeout).
+		msg := lastErr.Error()
+		if !strings.Contains(msg, "connection refused") && !strings.Contains(msg, "deadline exceeded") {
+			return lastErr
+		}
+	}
+
+	return lastErr
+}
+
+func (c *Client) doJSONOnce(ctx context.Context, method, path string, body io.Reader, out any) error {
 	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if c.authToken != "" {
+		request.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {

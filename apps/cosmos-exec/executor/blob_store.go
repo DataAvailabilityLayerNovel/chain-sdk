@@ -30,10 +30,21 @@ type BlobStore struct {
 
 // NewBlobStore returns a BlobStore with default size limits.
 func NewBlobStore() *BlobStore {
+	return NewBlobStoreWithLimits(DefaultMaxBlobSize, DefaultMaxStoreTotalBytes)
+}
+
+// NewBlobStoreWithLimits returns a BlobStore with custom size limits.
+func NewBlobStoreWithLimits(maxBlobSize, maxTotalSize int) *BlobStore {
+	if maxBlobSize <= 0 {
+		maxBlobSize = DefaultMaxBlobSize
+	}
+	if maxTotalSize <= 0 {
+		maxTotalSize = DefaultMaxStoreTotalBytes
+	}
 	return &BlobStore{
 		blobs:        make(map[string][]byte),
-		maxBlobSize:  DefaultMaxBlobSize,
-		maxTotalSize: DefaultMaxStoreTotalBytes,
+		maxBlobSize:  maxBlobSize,
+		maxTotalSize: maxTotalSize,
 	}
 }
 

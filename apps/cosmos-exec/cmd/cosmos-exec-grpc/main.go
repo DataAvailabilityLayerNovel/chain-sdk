@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,71 +11,189 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	db "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/config"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
 	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 	execgrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc"
 )
 
 func main() {
-	listenAddr := flag.String("address", "0.0.0.0:50051", "gRPC listen address")
-	home := flag.String("home", ".cosmos-exec-grpc", "home directory")
+	profileStr := flag.String("profile", "dev", "Config profile: dev, test, prod")
+	listenAddr := flag.String("address", "", "gRPC listen address (default from profile)")
+	home := flag.String("home", "", "home directory (default from profile)")
 	inMemory := flag.Bool("in-memory", false, "Use in-memory DB (avoids file lock, non-persistent)")
+	logLevel := flag.String("log-level", "", "Log level: debug, info, error")
 	flag.Parse()
 
-	if err := os.MkdirAll(*home, 0o755); err != nil {
-		die("failed to create home directory", err)
+	cfg := config.ForProfile(config.Profile(*profileStr))
+	cfg.LoadFromEnv()
+
+	// CLI flags override env/profile.
+	if *listenAddr != "" {
+		cfg.ListenAddr = *listenAddr
+	}
+	if *home != "" {
+		cfg.Home = *home
+	}
+	if *inMemory {
+		cfg.InMemory = true
+	}
+	if *logLevel != "" {
+		cfg.LogLevel = *logLevel
 	}
 
-	database, err := openDatabase(filepath.Join(*home, "data"), *inMemory)
+	if err := cfg.Validate(); err != nil {
+		die("invalid config", err)
+	}
+
+	if cfg.Home != "" {
+		if err := os.MkdirAll(cfg.Home, 0o755); err != nil {
+			die("failed to create home directory", err)
+		}
+	}
+
+	database, err := openDatabase(cfg.ResolveDataDir(), cfg.InMemory)
 	if err != nil {
 		die("failed to open database", err)
 	}
-	defer func() {
-		_ = database.Close()
-	}()
 
 	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
 	application := app.New(logger, database)
-	cosmosExecutor := executor.New(application)
+
+	// Build executor options.
+	opts := []executor.Option{
+		executor.WithQueryGasMax(cfg.QueryGasMax),
+		executor.WithBlobStoreLimits(cfg.MaxBlobSize, cfg.MaxStoreTotalSize),
+	}
+
+	// Enable persistence by default when not in-memory mode.
+	if !cfg.InMemory {
+		cfg.PersistBlobs = true
+		cfg.PersistTxResults = true
+	}
+	if cfg.PersistBlobs || cfg.PersistTxResults {
+		persistDir := cfg.ResolveDataDir()
+		if persistDir != "" {
+			opts = append(opts, executor.WithPersistence(persistDir))
+			logger.Info("persistence enabled", "dir", persistDir)
+		}
+	}
+
+	cosmosExecutor := executor.New(application, opts...)
+	m := newMetrics()
+
 	handler := execgrpc.NewExecutorServiceHandlerWithMux(cosmosExecutor, func(mux *http.ServeMux) {
-		mux.HandleFunc("/tx/submit", submitTxHandler(cosmosExecutor))
+		mux.HandleFunc("/tx/submit", withMetrics(submitTxHandler(cosmosExecutor), m, "tx_submit"))
 		mux.HandleFunc("/tx/result", txResultHandler(cosmosExecutor))
-		mux.HandleFunc("/wasm/query-smart", querySmartHandler(cosmosExecutor))
-		mux.HandleFunc("/blob/submit", blobSubmitHandler(cosmosExecutor))
+		mux.HandleFunc("/wasm/query-smart", withMetrics(querySmartHandler(cosmosExecutor), m, "query"))
+		mux.HandleFunc("/blob/submit", withMetrics(blobSubmitHandler(cosmosExecutor), m, "blob_submit"))
 		mux.HandleFunc("/blob/retrieve", blobRetrieveHandler(cosmosExecutor))
-		mux.HandleFunc("/blob/batch", blobBatchHandler(cosmosExecutor))
+		mux.HandleFunc("/blob/batch", withMetrics(blobBatchHandler(cosmosExecutor), m, "blob_submit"))
 		mux.HandleFunc("/blob/estimate-cost", blobEstimateCostHandler())
 		mux.HandleFunc("/blocks/latest", blocksLatestHandler(cosmosExecutor))
 		mux.HandleFunc("/blocks/{height}", blockByHeightHandler(cosmosExecutor))
 		mux.HandleFunc("/status", statusHandler(cosmosExecutor))
 		mux.HandleFunc("/tx/pending", txPendingHandler(cosmosExecutor))
 		mux.HandleFunc("/tx/{hash}", txByHashHandler(cosmosExecutor))
+		mux.HandleFunc("/health", healthHandler(cosmosExecutor))
+		mux.HandleFunc("/healthz", healthHandler(cosmosExecutor))
+		mux.HandleFunc("/ready", readyHandler(cosmosExecutor))
+		mux.HandleFunc("/metrics", metricsHandler(cosmosExecutor, m))
+		mux.HandleFunc("/metrics.json", metricsJSONHandler(cosmosExecutor, m))
 		mux.HandleFunc("/swagger", swaggerUIHandler())
 		mux.HandleFunc("/swagger.json", swaggerJSONHandler())
 	})
 
-	srv := &http.Server{
-		Addr:    *listenAddr,
-		Handler: handler,
+	// Wrap with security middleware.
+	secCfg := SecurityConfig{
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
+		AuthToken:           cfg.AuthToken,
+		CORSAllowOrigin:     cfg.CORSAllowOrigin,
+		RateLimitRPS:        cfg.RateLimitRPS,
+		ReadOnlyMode:        cfg.ReadOnlyMode,
+	}
+	wrappedHandler := securityMiddleware(handler, secCfg)
+
+	// Wrap with metrics counting.
+	if cfg.MetricsEnabled {
+		wrappedHandler = metricsCountingMiddleware(wrappedHandler, m)
 	}
 
-	fmt.Printf("cosmos-exec gRPC executor listening on %s\n", *listenAddr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		die("failed to start gRPC executor server", err)
+	srv := &http.Server{
+		Addr:         cfg.ListenAddr,
+		Handler:      wrappedHandler,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+	}
+
+	// Graceful shutdown on SIGINT/SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		logger.Info("cosmos-exec gRPC executor starting",
+			"addr", cfg.ListenAddr,
+			"profile", string(cfg.Profile),
+			"in_memory", cfg.InMemory,
+			"persist", cfg.PersistBlobs || cfg.PersistTxResults,
+			"rate_limit", cfg.RateLimitRPS,
+			"auth", cfg.AuthToken != "",
+		)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			die("failed to start server", err)
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Info("shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("shutdown error", "err", err)
+	}
+
+	// Close persistence store if executor has one.
+	cosmosExecutor.Close()
+
+	_ = database.Close()
+	logger.Info("shutdown complete")
+}
+
+// withMetrics wraps a handler to increment the appropriate metric counter.
+func withMetrics(next http.HandlerFunc, m *Metrics, kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch kind {
+		case "tx_submit":
+			m.incTxSubmit()
+		case "blob_submit":
+			m.incBlobSubmit()
+		case "query":
+			m.incQuery()
+		}
+		next(w, r)
 	}
 }
 
 func openDatabase(dataDir string, inMemory bool) (db.DB, error) {
 	if inMemory {
 		return db.NewMemDB(), nil
+	}
+
+	if dataDir == "" {
+		dataDir = ".cosmos-exec-grpc/data"
 	}
 
 	database, err := db.NewGoLevelDB("application", dataDir)
@@ -93,10 +212,11 @@ func die(msg string, err error) {
 		fmt.Fprintln(os.Stderr, msg)
 		os.Exit(1)
 	}
-
 	fmt.Fprintf(os.Stderr, "%s: %v\n", msg, err)
 	os.Exit(1)
 }
+
+// ── Request/Response types ──────────────────────────────────────────────────
 
 type submitTxRequest struct {
 	TxBase64 string `json:"tx_base64"`
@@ -107,6 +227,49 @@ type submitTxResponse struct {
 	Hash string `json:"hash"`
 }
 
+type querySmartRequest struct {
+	Contract string          `json:"contract"`
+	Msg      json.RawMessage `json:"msg"`
+}
+
+type blobSubmitRequest struct {
+	DataBase64 string `json:"data_base64"`
+}
+
+type blobSubmitResponse struct {
+	Commitment string `json:"commitment"`
+	Size       int    `json:"size"`
+}
+
+type blobRetrieveResponse struct {
+	Commitment string `json:"commitment"`
+	DataBase64 string `json:"data_base64"`
+	Size       int    `json:"size"`
+}
+
+type blobBatchRequest struct {
+	BlobsBase64 []string `json:"blobs_base64"`
+}
+
+type blobBatchResponse struct {
+	Root        string   `json:"root"`
+	Commitments []string `json:"commitments"`
+	Count       int      `json:"count"`
+}
+
+type estimateCostRequest struct {
+	DataBytes   int     `json:"data_bytes"`
+	GasPriceTIA float64 `json:"gas_price_tia,omitempty"`
+	MaxBlobSize int     `json:"max_blob_size,omitempty"`
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+const maxTxSize = 10 * 1024 * 1024   // 10 MB
+const maxBlobBatchSize = 100          // max blobs per batch
+const maxQueryMsgSize = 256 * 1024    // 256 KB
+const maxHashLen = 128                // max hash hex length
+
 func submitTxHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -114,7 +277,7 @@ func submitTxHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxTxSize))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 			return
@@ -154,6 +317,10 @@ func txResultHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash is required"})
 			return
 		}
+		if len(hash) > maxHashLen {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash too long"})
+			return
+		}
 
 		result, found, err := exec.GetTxResult(r.Context(), hash)
 		if err != nil {
@@ -170,11 +337,6 @@ func txResultHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	}
 }
 
-type querySmartRequest struct {
-	Contract string          `json:"contract"`
-	Msg      json.RawMessage `json:"msg"`
-}
-
 func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -188,7 +350,7 @@ func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxQueryMsgSize))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 			return
@@ -197,6 +359,15 @@ func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 		var req querySmartRequest
 		if err := json.Unmarshal(body, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		if req.Contract == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "contract is required"})
+			return
+		}
+		if len(req.Msg) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "msg is required"})
 			return
 		}
 
@@ -214,51 +385,6 @@ func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, map[string]any{"data": decoded})
 	}
-}
-
-func decodeTx(hexInput, base64Input string) ([]byte, error) {
-	hexInput = strings.TrimSpace(hexInput)
-	if hexInput != "" {
-		hexInput = strings.TrimPrefix(hexInput, "0x")
-		hexInput = strings.TrimPrefix(hexInput, "0X")
-		bz, err := hex.DecodeString(hexInput)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tx_hex: %w", err)
-		}
-		if len(bz) == 0 {
-			return nil, errors.New("tx cannot be empty")
-		}
-		return bz, nil
-	}
-
-	base64Input = strings.TrimSpace(base64Input)
-	if base64Input != "" {
-		bz, err := base64.StdEncoding.DecodeString(base64Input)
-		if err != nil {
-			return nil, fmt.Errorf("invalid tx_base64: %w", err)
-		}
-		if len(bz) == 0 {
-			return nil, errors.New("tx cannot be empty")
-		}
-		return bz, nil
-	}
-
-	return nil, errors.New("tx_base64 or tx_hex is required")
-}
-
-type blobSubmitRequest struct {
-	DataBase64 string `json:"data_base64"`
-}
-
-type blobSubmitResponse struct {
-	Commitment string `json:"commitment"`
-	Size       int    `json:"size"`
-}
-
-type blobRetrieveResponse struct {
-	Commitment string `json:"commitment"`
-	DataBase64 string `json:"data_base64"`
-	Size       int    `json:"size"`
 }
 
 func blobSubmitHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
@@ -305,16 +431,6 @@ func blobSubmitHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	}
 }
 
-type blobBatchRequest struct {
-	BlobsBase64 []string `json:"blobs_base64"`
-}
-
-type blobBatchResponse struct {
-	Root        string   `json:"root"`
-	Commitments []string `json:"commitments"`
-	Count       int      `json:"count"`
-}
-
 func blobBatchHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -336,6 +452,10 @@ func blobBatchHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 
 		if len(req.BlobsBase64) == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "blobs_base64 is required and must not be empty"})
+			return
+		}
+		if len(req.BlobsBase64) > maxBlobBatchSize {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("batch too large: max %d blobs", maxBlobBatchSize)})
 			return
 		}
 
@@ -375,6 +495,10 @@ func blobRetrieveHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitment is required"})
 			return
 		}
+		if len(commitment) > 128 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitment too long"})
+			return
+		}
 
 		data, err := exec.RetrieveBlob(r.Context(), commitment)
 		if err != nil {
@@ -390,12 +514,6 @@ func blobRetrieveHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	}
 }
 
-type estimateCostRequest struct {
-	DataBytes   int     `json:"data_bytes"`
-	GasPriceTIA float64 `json:"gas_price_tia,omitempty"`
-	MaxBlobSize int     `json:"max_blob_size,omitempty"`
-}
-
 func blobEstimateCostHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -403,7 +521,7 @@ func blobEstimateCostHandler() http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 			return
@@ -417,6 +535,10 @@ func blobEstimateCostHandler() http.HandlerFunc {
 
 		if req.DataBytes <= 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_bytes must be > 0"})
+			return
+		}
+		if req.DataBytes > 100*1024*1024 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_bytes exceeds 100 MB limit"})
 			return
 		}
 
@@ -525,6 +647,10 @@ func txByHashHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash is required"})
 			return
 		}
+		if len(hash) > maxHashLen {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash too long"})
+			return
+		}
 
 		result, found, err := exec.GetTxResult(r.Context(), hash)
 		if err != nil {
@@ -556,6 +682,80 @@ func txByHashHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			"events": result.Events,
 		})
 	}
+}
+
+func healthHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		stats := exec.GetStats()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":      "ok",
+			"blob_count":  stats.BlobCount,
+			"blob_bytes":  stats.BlobBytes,
+			"tx_count":    stats.TxResultCount,
+			"block_count": stats.BlockCount,
+		})
+	}
+}
+
+func readyHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		status, _ := exec.GetStatus(r.Context())
+		if !status.Initialized {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"ready":  false,
+				"reason": "not initialized",
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ready":            true,
+			"latest_height":    status.LatestHeight,
+			"finalized_height": status.FinalizedHeight,
+		})
+	}
+}
+
+// ── Utilities ───────────────────────────────────────────────────────────────
+
+func decodeTx(hexInput, base64Input string) ([]byte, error) {
+	hexInput = strings.TrimSpace(hexInput)
+	if hexInput != "" {
+		hexInput = strings.TrimPrefix(hexInput, "0x")
+		hexInput = strings.TrimPrefix(hexInput, "0X")
+		bz, err := hex.DecodeString(hexInput)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tx_hex: %w", err)
+		}
+		if len(bz) == 0 {
+			return nil, errors.New("tx cannot be empty")
+		}
+		return bz, nil
+	}
+
+	base64Input = strings.TrimSpace(base64Input)
+	if base64Input != "" {
+		bz, err := base64.StdEncoding.DecodeString(base64Input)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tx_base64: %w", err)
+		}
+		if len(bz) == 0 {
+			return nil, errors.New("tx cannot be empty")
+		}
+		return bz, nil
+	}
+
+	return nil, errors.New("tx_base64 or tx_hex is required")
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

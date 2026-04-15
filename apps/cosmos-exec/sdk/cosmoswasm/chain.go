@@ -14,11 +14,13 @@ import (
 	"time"
 )
 
+// Default endpoint URLs used by DALChainConfig when no overrides are provided.
+// These match the ports used by the local dev runner (run-cosmos-wasm-nodes.go).
 const (
-	defaultSequencerRPCURL  = "http://127.0.0.1:38331"
-	defaultFullNodeRPCURL   = "http://127.0.0.1:48331"
-	defaultSequencerExecURL = "http://127.0.0.1:50051"
-	defaultFullNodeExecURL  = "http://127.0.0.1:50052"
+	DefaultSequencerRPCURL  = "http://127.0.0.1:38331"
+	DefaultFullNodeRPCURL   = "http://127.0.0.1:48331"
+	DefaultSequencerExecURL = "http://127.0.0.1:50051"
+	DefaultFullNodeExecURL  = "http://127.0.0.1:50052"
 )
 
 type DALChainConfig struct {
@@ -34,6 +36,12 @@ type DALChainConfig struct {
 	SubmitInterval time.Duration
 	Stdout         io.Writer
 	Stderr         io.Writer
+
+	// Endpoint overrides — when empty, defaults are used.
+	SequencerRPC     string
+	FullNodeRPC      string
+	SequencerExecURL string
+	FullNodeExecURL  string
 }
 
 type DALChainEndpoints struct {
@@ -118,10 +126,10 @@ func StartDALChain(ctx context.Context, cfg DALChainConfig) (*DALChainProcess, e
 	}
 
 	endpoints := DALChainEndpoints{
-		SequencerRPC:     defaultSequencerRPCURL,
-		FullNodeRPC:      defaultFullNodeRPCURL,
-		SequencerExecAPI: defaultSequencerExecURL,
-		FullNodeExecAPI:  defaultFullNodeExecURL,
+		SequencerRPC:     orDefault(cfg.SequencerRPC, DefaultSequencerRPCURL),
+		FullNodeRPC:      orDefault(cfg.FullNodeRPC, DefaultFullNodeRPCURL),
+		SequencerExecAPI: orDefault(cfg.SequencerExecURL, DefaultSequencerExecURL),
+		FullNodeExecAPI:  orDefault(cfg.FullNodeExecURL, DefaultFullNodeExecURL),
 	}
 
 	if err := waitForLive(ctx, endpoints.SequencerRPC+"/health/live", 120*time.Second); err != nil {
@@ -177,4 +185,11 @@ func waitForLive(ctx context.Context, url string, timeout time.Duration) error {
 	}
 
 	return fmt.Errorf("timeout waiting for %s", url)
+}
+
+func orDefault(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }

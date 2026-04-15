@@ -335,5 +335,81 @@ SDK hỗ trợ:
 | GET | `/blob/retrieve?commitment=` | Retrieve blob by commitment |
 | POST | `/blob/batch` | Store N blobs, get Merkle root |
 | POST | `/blob/estimate-cost` | Compare direct-tx vs blob+commit gas |
+| GET | `/health` | Health check (blob/tx/block counts) |
+| GET | `/healthz` | Alias for `/health` |
+| GET | `/ready` | Readiness probe (initialized? 200/503) |
+| GET | `/metrics` | Prometheus-format metrics |
+| GET | `/metrics.json` | Metrics as JSON |
 | GET | `/swagger` | Swagger UI (interactive docs) |
 | GET | `/swagger.json` | OpenAPI 3.0.3 spec |
+
+## Config & Profiles
+
+`cosmos-exec-grpc` supports 3 profiles: `dev` (default), `test`, `prod`.
+
+```bash
+# Dev (default) — no persistence, no rate limit, CORS=*
+go run ./cmd/cosmos-exec-grpc
+
+# Test — in-memory only, bind localhost, minimal logging
+go run ./cmd/cosmos-exec-grpc --profile=test
+
+# Prod — persistence on, rate limit 100 rps, timeouts tuned
+go run ./cmd/cosmos-exec-grpc --profile=prod --address 0.0.0.0:50051
+```
+
+### Config precedence
+
+`profile defaults` → `env vars (COSMOS_EXEC_*)` → `CLI flags`
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `COSMOS_EXEC_LISTEN_ADDR` | Listen address | `0.0.0.0:50051` |
+| `COSMOS_EXEC_HOME` | Home directory | `.cosmos-exec-grpc` |
+| `COSMOS_EXEC_IN_MEMORY` | Use in-memory DB | `false` |
+| `COSMOS_EXEC_PROFILE` | Config profile | `dev` |
+| `COSMOS_EXEC_LOG_LEVEL` | Log level | `info` |
+| `COSMOS_EXEC_AUTH_TOKEN` | Bearer token for POST endpoints | (none) |
+| `COSMOS_EXEC_CORS_ORIGIN` | CORS Allow-Origin header | `*` |
+| `COSMOS_EXEC_RATE_LIMIT_RPS` | Max requests/sec per IP | `0` (off) |
+| `COSMOS_EXEC_READ_ONLY` | Reject all POST requests | `false` |
+| `COSMOS_EXEC_PERSIST_BLOBS` | Persist blobs to disk | `false` (dev) |
+| `COSMOS_EXEC_PERSIST_TX_RESULTS` | Persist tx results to disk | `false` (dev) |
+| `COSMOS_EXEC_DATA_DIR` | Data directory override | `{home}/data` |
+| `COSMOS_EXEC_MAX_BLOB_SIZE` | Max single blob bytes | `4194304` (4 MB) |
+| `COSMOS_EXEC_MAX_STORE_SIZE` | Max total blob store bytes | `268435456` (256 MB) |
+| `COSMOS_EXEC_QUERY_GAS_MAX` | WASM query gas limit | `50000000` |
+| `COSMOS_EXEC_METRICS` | Enable metrics counting | `false` |
+
+### Production checklist
+
+1. **Use `--profile=prod`** — enables persistence, rate limiting, tuned timeouts
+2. **Set `COSMOS_EXEC_AUTH_TOKEN`** — protects `/tx/submit`, `/blob/submit`, `/wasm/query-smart`
+3. **Set `COSMOS_EXEC_CORS_ORIGIN`** — restrict to your frontend domain
+4. **Persistence is automatic** — when not `--in-memory`, blobs + tx results + blocks survive restart
+5. **Graceful shutdown** — `Ctrl+C` / `SIGTERM` drains connections before exit
+6. **Monitor** — scrape `/metrics` with Prometheus or poll `/metrics.json`
+7. **Health probes** — K8s liveness: `/healthz`, readiness: `/ready`
+
+### Read-only query node
+
+For a public query node that can't modify state:
+
+```bash
+COSMOS_EXEC_READ_ONLY=true \
+COSMOS_EXEC_RATE_LIMIT_RPS=50 \
+go run ./cmd/cosmos-exec-grpc --profile=prod --address 0.0.0.0:50052
+```
+
+### Security middleware
+
+All HTTP endpoints are wrapped with:
+- **CORS** — configurable origin, preflight handled automatically
+- **Auth** — Bearer token required on POST endpoints (when `COSMOS_EXEC_AUTH_TOKEN` is set)
+- **Rate limiting** — per-IP token bucket (when `COSMOS_EXEC_RATE_LIMIT_RPS > 0`)
+- **Body size limit** — 10 MB default, prevents OOM from oversized requests
+- **Read-only mode** — rejects all POST requests (for public query nodes)
+- **Timeouts** — read/write/idle timeouts on HTTP server
+- **Input validation** — max hash length, max batch size, max data_bytes, etc.

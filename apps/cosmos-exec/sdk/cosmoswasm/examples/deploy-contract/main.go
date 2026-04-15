@@ -42,7 +42,7 @@ import (
 func main() {
 	execURL := os.Getenv("EXEC_URL")
 	if execURL == "" {
-		execURL = "http://127.0.0.1:50051"
+		execURL = cosmoswasm.DefaultExecAPIURL
 	}
 
 	client := cosmoswasm.NewClient(execURL)

@@ -31,7 +31,7 @@ func main() {
 	// ── Connect ──────────────────────────────────────────────────────────
 	url := os.Getenv("EXEC_URL")
 	if url == "" {
-		url = "http://127.0.0.1:50051"
+		url = cosmoswasm.DefaultExecAPIURL
 	}
 	client := cosmoswasm.NewClient(url)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

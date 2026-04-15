@@ -38,6 +38,9 @@ type CosmosExecutor struct {
 	// Callers store the returned commitment (32-byte SHA-256 hex) on-chain
 	// via a WASM message, keeping gas costs minimal.
 	blobStore *BlobStore
+
+	queryGasMax  uint64
+	persistStore *PersistStore
 }
 
 type BlockInfo struct {
@@ -74,14 +77,66 @@ type TxExecutionResult struct {
 	Events []TxEvent `json:"events,omitempty"`
 }
 
-func New(appInstance *app.App) *CosmosExecutor {
-	return &CosmosExecutor{
-		app:       appInstance,
-		mempool:   make([][]byte, 0, 1024),
-		txResults: make(map[string]TxExecutionResult),
-		blocks:    make(map[uint64]BlockInfo),
-		blobStore: NewBlobStore(),
+// Option configures the executor at creation time.
+type Option func(*CosmosExecutor)
+
+// WithQueryGasMax sets the gas limit for WASM smart queries.
+func WithQueryGasMax(gas uint64) Option {
+	return func(e *CosmosExecutor) {
+		if gas > 0 {
+			e.queryGasMax = gas
+		}
 	}
+}
+
+// WithBlobStoreLimits sets size limits on the in-memory blob store.
+func WithBlobStoreLimits(maxBlobSize, maxTotalSize int) Option {
+	return func(e *CosmosExecutor) {
+		e.blobStore = NewBlobStoreWithLimits(maxBlobSize, maxTotalSize)
+	}
+}
+
+// WithPersistence enables disk-backed persistence for blobs, tx results, and blocks.
+// On startup it replays persisted data into memory; during operation it appends new data.
+func WithPersistence(dir string) Option {
+	return func(e *CosmosExecutor) {
+		ps, err := NewPersistStore(dir)
+		if err != nil {
+			return
+		}
+		e.persistStore = ps
+
+		// Replay persisted data.
+		if txResults, err := ps.LoadTxResults(); err == nil {
+			for k, v := range txResults {
+				e.txResults[k] = v
+			}
+		}
+		if blocks, err := ps.LoadBlocks(); err == nil {
+			for k, v := range blocks {
+				e.blocks[k] = v
+				if k > e.lastHeight {
+					e.lastHeight = k
+				}
+			}
+		}
+		ps.LoadBlobs(e.blobStore) //nolint:errcheck
+	}
+}
+
+func New(appInstance *app.App, opts ...Option) *CosmosExecutor {
+	exec := &CosmosExecutor{
+		app:         appInstance,
+		mempool:     make([][]byte, 0, 1024),
+		txResults:   make(map[string]TxExecutionResult),
+		blocks:      make(map[uint64]BlockInfo),
+		blobStore:   NewBlobStore(),
+		queryGasMax: 50_000_000,
+	}
+	for _, opt := range opts {
+		opt(exec)
+	}
+	return exec
 }
 
 // StoreBlob stores arbitrary data in the executor's content-addressed blob
@@ -92,7 +147,14 @@ func (e *CosmosExecutor) StoreBlob(ctx context.Context, data []byte) (string, er
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return e.blobStore.Put(data)
+	commitment, err := e.blobStore.Put(data)
+	if err != nil {
+		return "", err
+	}
+	if e.persistStore != nil {
+		_ = e.persistStore.AppendBlob(commitment, data)
+	}
+	return commitment, nil
 }
 
 // RetrieveBlob fetches a blob by its SHA-256 commitment.
@@ -216,12 +278,16 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 		txHash := hashTx(tx)
 		deliverResp := e.app.DeliverTx(abci.RequestDeliverTx{Tx: tx})
 
-		e.txResults[txHash] = TxExecutionResult{
+		txResult := TxExecutionResult{
 			Hash:   txHash,
 			Height: blockHeight,
 			Code:   deliverResp.Code,
 			Log:    deliverResp.Log,
 			Events: toEvents(deliverResp.Events),
+		}
+		e.txResults[txHash] = txResult
+		if e.persistStore != nil {
+			_ = e.persistStore.AppendTxResult(txResult)
 		}
 	}
 
@@ -231,11 +297,15 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 	e.stateRoot = append([]byte(nil), commitResp.Data...)
 	e.lastHeight = blockHeight
 
-	e.blocks[blockHeight] = BlockInfo{
+	blockInfo := BlockInfo{
 		Height:  blockHeight,
 		Time:    timestamp.UTC().Format(time.RFC3339),
 		AppHash: fmt.Sprintf("%x", commitResp.Data),
 		NumTxs:  len(txs),
+	}
+	e.blocks[blockHeight] = blockInfo
+	if e.persistStore != nil {
+		_ = e.persistStore.AppendBlock(blockInfo)
 	}
 
 	return append([]byte(nil), e.stateRoot...), nil
@@ -313,7 +383,7 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 	})
 
 	// Set a gas limit to prevent unbounded WASM queries from panicking with out-of-gas.
-	queryCtx = queryCtx.WithGasMeter(sdk.NewGasMeter(50_000_000))
+	queryCtx = queryCtx.WithGasMeter(sdk.NewGasMeter(e.queryGasMax))
 
 	queryResult, queryErr := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
 	if queryErr != nil {
@@ -435,6 +505,36 @@ func (e *CosmosExecutor) GetPendingTxCount(ctx context.Context) (int, error) {
 	defer e.mu.Unlock()
 
 	return len(e.mempool), nil
+}
+
+// Close releases resources held by the executor (e.g. persistence files).
+func (e *CosmosExecutor) Close() {
+	if e.persistStore != nil {
+		_ = e.persistStore.Close()
+	}
+}
+
+// Stats holds runtime metrics for monitoring.
+type Stats struct {
+	BlobCount     int `json:"blob_count"`
+	BlobBytes     int `json:"blob_bytes"`
+	TxResultCount int `json:"tx_result_count"`
+	BlockCount    int `json:"block_count"`
+	MempoolSize   int `json:"mempool_size"`
+}
+
+// GetStats returns runtime metrics for health/monitoring endpoints.
+func (e *CosmosExecutor) GetStats() Stats {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return Stats{
+		BlobCount:     e.blobStore.Count(),
+		BlobBytes:     e.blobStore.TotalBytes(),
+		TxResultCount: len(e.txResults),
+		BlockCount:    len(e.blocks),
+		MempoolSize:   len(e.mempool),
+	}
 }
 
 func bytesEqual(a, b []byte) bool {
