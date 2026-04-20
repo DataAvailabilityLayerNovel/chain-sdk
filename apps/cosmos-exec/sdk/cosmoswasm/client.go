@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/txcodec"
 )
 
 type submitTxRequest struct {
@@ -138,7 +140,7 @@ func (c *Client) QuerySmartRaw(ctx context.Context, contract string, msg any) (*
 		return nil, errors.New("contract is required")
 	}
 
-	msgJSON, err := normalizeJSONMsg(msg)
+	msgJSON, err := txcodec.NormalizeJSONMsg(msg)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query msg: %w", err)
 	}

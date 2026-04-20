@@ -10,6 +10,22 @@ test:
     @echo "--> Running unit tests"
     @go run -tags='run integration' scripts/test.go
 
+# Run all CI checks (tidy + vet + build + test) across every go.mod
+[group('test')]
+ci-all:
+    @echo "--> Running CI checks for all modules"
+    @./scripts/ci-all-modules.sh all
+
+# Check go.sum freshness across all modules
+[group('test')]
+ci-tidy:
+    @./scripts/ci-all-modules.sh tidy
+
+# Vet all modules
+[group('test')]
+ci-vet:
+    @./scripts/ci-all-modules.sh vet
+
 # Run all tests including Docker E2E
 [group('test')]
 test-all: test test-docker-e2e

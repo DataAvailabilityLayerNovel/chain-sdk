@@ -1,9 +1,38 @@
-# cosmos-exec
+# Cosmos/WASM Stack
 
-`cosmos-exec` currently provides two entrypoints:
+Cosmos/WASM rollup trên ev-node gồm 2 binary:
 
-- `cmd/cosmos-exec`: standalone ABCI socket server.
-- `cmd/cosmos-exec-grpc`: gRPC execution service compatible with `core/execution.Executor` via `execution/grpc`.
+| Binary | Package | Vai trò |
+|--------|---------|---------|
+| `cosmos-exec-grpc` | `apps/cosmos-exec/cmd/cosmos-exec-grpc` | **Execution service** — Cosmos SDK + CosmWasm runtime, HTTP API, blob store |
+| `evcosmos` | `apps/cosmos-wasm` | **Full node** — sequencer, P2P, DA sync, block production |
+
+`cosmos-exec` còn có `cmd/cosmos-exec` (standalone ABCI socket server) cho testing.
+
+## Build
+
+```bash
+# Execution service
+cd apps/cosmos-exec
+go build -o cosmos-exec-grpc ./cmd/cosmos-exec-grpc
+
+# Full node
+cd apps/cosmos-wasm
+go build -o evcosmos
+```
+
+## evcosmos commands
+
+```bash
+# Init config + genesis
+./evcosmos init --root-dir ~/.evcosmos --chain-id cosmos-wasm-test-chain
+
+# Start node (cần cosmos-exec-grpc đang chạy)
+./evcosmos start \
+  --root-dir ~/.evcosmos \
+  --grpc-executor-url http://localhost:50051 \
+  --da.address http://localhost:7980
+```
 
 ## Hai chế độ chạy
 
@@ -301,10 +330,9 @@ pkill -f cosmos-exec-grpc; pkill -f evcosmos
 
 ## Notes
 
-- Current app wiring in `app/app.go` includes `auth`, `bank`, `x/params`, `x/capability`, IBC core, IBC transfer, and `x/wasm` (`WasmKeeper` + `wasm AppModule`).
-- `WasmKeeper` is wired to real IBC keepers (`IBCKeeper.ChannelKeeper`, `IBCKeeper.PortKeeper`, scoped capabilities, `TransferKeeper`).
-- This is a bridge skeleton to unblock `apps/cosmos-wasm` full-node flow.
-- Full production parity still requires wiring real staking/distribution keepers for wasm query plugin behavior and e2e verification of contract lifecycle.
+- `app/app.go` wires `auth`, `bank`, `x/params`, `x/capability`, IBC core, IBC transfer, and `x/wasm`.
+- `WasmKeeper` is connected to real IBC keepers (channel, port, scoped capabilities, transfer).
+- Full production parity still requires real staking/distribution keepers for wasm query plugin.
 
 ## Go SDK for dApp users
 

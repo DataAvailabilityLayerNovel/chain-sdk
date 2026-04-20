@@ -1,7 +1,6 @@
 package cosmoswasm
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -16,32 +15,19 @@ func TestDefaultDALChainConfig(t *testing.T) {
 	}
 }
 
-func TestBuildRunnerArgs(t *testing.T) {
+func TestDALChainConfigDefaults(t *testing.T) {
 	cfg := DefaultDALChainConfig("/tmp/ev-node")
-	cfg.ChainName = "my-chain"
-	cfg.CleanOnStart = false
-	cfg.CleanOnExit = true
-	cfg.LogLevel = "debug"
-	cfg.BlockTime = 3 * time.Second
-	cfg.SubmitInterval = 12 * time.Second
 
-	args := buildRunnerArgs(cfg)
-	joined := strings.Join(args, " ")
-
-	expectedParts := []string{
-		"run",
-		"./scripts/run-cosmos-wasm-nodes.go",
-		"--chain-id my-chain",
-		"--clean-on-start=false",
-		"--clean-on-exit=true",
-		"--log-level debug",
-		"--block-time 3s",
-		"--submit-interval 12s",
+	if cfg.BlockTime != 2*time.Second {
+		t.Fatalf("unexpected block time: %s", cfg.BlockTime)
 	}
-
-	for _, part := range expectedParts {
-		if !strings.Contains(joined, part) {
-			t.Fatalf("missing part %q in args: %s", part, joined)
-		}
+	if cfg.SubmitInterval != 8*time.Second {
+		t.Fatalf("unexpected submit interval: %s", cfg.SubmitInterval)
+	}
+	if cfg.CleanOnStart != true {
+		t.Fatal("expected CleanOnStart to be true")
+	}
+	if cfg.LogLevel != "info" {
+		t.Fatalf("unexpected log level: %s", cfg.LogLevel)
 	}
 }

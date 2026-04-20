@@ -18,7 +18,7 @@ import (
 
 func TestReflectContractLifecycle(t *testing.T) {
 	application := New(log.NewNopLogger(), db.NewMemDB())
-	application.InitChainWithDefaultGenesis()
+	application.InitChainWithDefaultGenesis("")
 
 	ctx := application.BaseApp.NewContext(false, tmproto.Header{
 		Height:  1,

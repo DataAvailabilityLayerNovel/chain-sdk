@@ -73,7 +73,7 @@ type App struct {
 	ModuleManager *module.Manager
 }
 
-func New(logger log.Logger, database db.DB) *App {
+func New(logger log.Logger, database db.DB, chainID ...string) *App {
 	interfaceRegistry := types.NewInterfaceRegistry()
 
 	legacyAmino := codec.NewLegacyAmino()
@@ -96,7 +96,12 @@ func New(logger log.Logger, database db.DB) *App {
 
 	txConfig := authtx.NewTxConfig(appCodec, authtx.DefaultSignModes)
 
-	base := baseapp.NewBaseApp("cosmos-exec", logger, database, txConfig.TxDecoder())
+	var baseOpts []func(*baseapp.BaseApp)
+	if len(chainID) > 0 && chainID[0] != "" {
+		baseOpts = append(baseOpts, baseapp.SetChainID(chainID[0]))
+	}
+
+	base := baseapp.NewBaseApp("cosmos-exec", logger, database, txConfig.TxDecoder(), baseOpts...)
 	base.SetInterfaceRegistry(interfaceRegistry)
 
 	keys := sdk.NewKVStoreKeys(
@@ -299,10 +304,10 @@ func (app *App) DefaultGenesis() []byte {
 	return bz
 }
 
-func (app *App) InitChainWithDefaultGenesis() abci.ResponseInitChain {
+func (app *App) InitChainWithDefaultGenesis(chainID string) abci.ResponseInitChain {
 	return app.InitChain(abci.RequestInitChain{
 		Time:          time.Now(),
-		ChainId:       "",
+		ChainId:       chainID,
 		AppStateBytes: app.DefaultGenesis(),
 	})
 }

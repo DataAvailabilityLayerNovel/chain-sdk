@@ -2,27 +2,22 @@ package cosmoswasm
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/devchain"
 )
 
 // Default endpoint URLs used by DALChainConfig when no overrides are provided.
-// These match the ports used by the local dev runner (run-cosmos-wasm-nodes.go).
 const (
-	DefaultSequencerRPCURL  = "http://127.0.0.1:38331"
-	DefaultFullNodeRPCURL   = "http://127.0.0.1:48331"
-	DefaultSequencerExecURL = "http://127.0.0.1:50051"
-	DefaultFullNodeExecURL  = "http://127.0.0.1:50052"
+	DefaultSequencerRPCURL  = devchain.DefaultSequencerRPCURL
+	DefaultFullNodeRPCURL   = devchain.DefaultFullNodeRPCURL
+	DefaultSequencerExecURL = devchain.DefaultSequencerExecURL
+	DefaultFullNodeExecURL  = devchain.DefaultFullNodeExecURL
 )
 
+// DALChainConfig holds configuration for launching a local DAL chain.
+// This is a dev/test utility — not part of the core SDK API.
 type DALChainConfig struct {
 	ProjectRoot    string
 	ChainName      string
@@ -37,13 +32,13 @@ type DALChainConfig struct {
 	Stdout         io.Writer
 	Stderr         io.Writer
 
-	// Endpoint overrides — when empty, defaults are used.
 	SequencerRPC     string
 	FullNodeRPC      string
 	SequencerExecURL string
 	FullNodeExecURL  string
 }
 
+// DALChainEndpoints contains the resolved endpoint URLs for the running chain.
 type DALChainEndpoints struct {
 	SequencerRPC     string
 	FullNodeRPC      string
@@ -51,145 +46,91 @@ type DALChainEndpoints struct {
 	FullNodeExecAPI  string
 }
 
+// DALChainProcess represents a running local chain process.
 type DALChainProcess struct {
-	Cmd       *exec.Cmd
 	Config    DALChainConfig
 	Endpoints DALChainEndpoints
+	proc      *devchain.Process
 }
 
-func DefaultDALChainConfig(projectRoot string) DALChainConfig {
-	return DALChainConfig{
-		ProjectRoot:    projectRoot,
-		ChainName:      "cosmos-wasm-local",
-		Namespace:      "rollup",
-		CleanOnStart:   true,
-		CleanOnExit:    false,
-		LogLevel:       "info",
-		BlockTime:      2 * time.Second,
-		SubmitInterval: 8 * time.Second,
-		Stdout:         os.Stdout,
-		Stderr:         os.Stderr,
-	}
-}
-
-func (c DALChainConfig) Validate() error {
-	if strings.TrimSpace(c.ProjectRoot) == "" {
-		return errors.New("project root is required")
-	}
-	if strings.TrimSpace(c.ChainName) == "" {
-		return errors.New("chain name is required")
-	}
-	if strings.TrimSpace(c.Namespace) == "" {
-		return errors.New("namespace is required")
-	}
-	if strings.TrimSpace(c.DABridgeRPC) == "" {
-		return errors.New("DA bridge RPC is required")
-	}
-	if c.BlockTime <= 0 {
-		return errors.New("block time must be greater than 0")
-	}
-	if c.SubmitInterval <= 0 {
-		return errors.New("submit interval must be greater than 0")
-	}
-	if _, err := os.Stat(filepath.Join(c.ProjectRoot, "scripts", "run-cosmos-wasm-nodes.go")); err != nil {
-		return fmt.Errorf("scripts/run-cosmos-wasm-nodes.go not found in project root: %w", err)
-	}
-
-	return nil
-}
-
+// Stop kills the running chain process.
 func (p *DALChainProcess) Stop() error {
-	if p == nil || p.Cmd == nil || p.Cmd.Process == nil {
+	if p == nil || p.proc == nil {
 		return nil
 	}
-	return p.Cmd.Process.Kill()
+	return p.proc.Stop()
 }
 
+// Validate checks that the config has all required fields.
+func (c DALChainConfig) Validate() error {
+	return dalConfigToInternal(c).Validate()
+}
+
+// DefaultDALChainConfig returns a DALChainConfig with sensible defaults.
+func DefaultDALChainConfig(projectRoot string) DALChainConfig {
+	dc := devchain.DefaultConfig(projectRoot)
+	return dalConfigFromInternal(dc)
+}
+
+// StartDALChain launches a local DAL chain and waits for it to become healthy.
 func StartDALChain(ctx context.Context, cfg DALChainConfig) (*DALChainProcess, error) {
-	if err := cfg.Validate(); err != nil {
+	ic := dalConfigToInternal(cfg)
+
+	proc, err := devchain.Start(ctx, ic)
+	if err != nil {
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "go", buildRunnerArgs(cfg)...)
-	cmd.Dir = cfg.ProjectRoot
-	cmd.Env = append(os.Environ(),
-		"DA_BRIDGE_RPC="+cfg.DABridgeRPC,
-		"DA_RPC="+cfg.DABridgeRPC,
-		"DA_NAMESPACE="+cfg.Namespace,
-		"DA_AUTH_TOKEN="+cfg.DAAuthToken,
-	)
-	cmd.Stdout = cfg.Stdout
-	cmd.Stderr = cfg.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start DAL chain runner: %w", err)
-	}
-
-	endpoints := DALChainEndpoints{
-		SequencerRPC:     orDefault(cfg.SequencerRPC, DefaultSequencerRPCURL),
-		FullNodeRPC:      orDefault(cfg.FullNodeRPC, DefaultFullNodeRPCURL),
-		SequencerExecAPI: orDefault(cfg.SequencerExecURL, DefaultSequencerExecURL),
-		FullNodeExecAPI:  orDefault(cfg.FullNodeExecURL, DefaultFullNodeExecURL),
-	}
-
-	if err := waitForLive(ctx, endpoints.SequencerRPC+"/health/live", 120*time.Second); err != nil {
-		return nil, fmt.Errorf("sequencer not ready: %w", err)
-	}
-	if err := waitForLive(ctx, endpoints.FullNodeRPC+"/health/live", 120*time.Second); err != nil {
-		return nil, fmt.Errorf("full node not ready: %w", err)
-	}
-
-	return &DALChainProcess{Cmd: cmd, Config: cfg, Endpoints: endpoints}, nil
+	return &DALChainProcess{
+		Config: cfg,
+		Endpoints: DALChainEndpoints{
+			SequencerRPC:     proc.Endpoints.SequencerRPC,
+			FullNodeRPC:      proc.Endpoints.FullNodeRPC,
+			SequencerExecAPI: proc.Endpoints.SequencerExecAPI,
+			FullNodeExecAPI:  proc.Endpoints.FullNodeExecAPI,
+		},
+		proc: proc,
+	}, nil
 }
 
-func buildRunnerArgs(cfg DALChainConfig) []string {
-	return []string{
-		"run",
-		"-tags",
-		"run_cosmos_wasm",
-		"./scripts/run-cosmos-wasm-nodes.go",
-		"--chain-id",
-		cfg.ChainName,
-		"--clean-on-start=" + strconv.FormatBool(cfg.CleanOnStart),
-		"--clean-on-exit=" + strconv.FormatBool(cfg.CleanOnExit),
-		"--log-level",
-		cfg.LogLevel,
-		"--block-time",
-		cfg.BlockTime.String(),
-		"--submit-interval",
-		cfg.SubmitInterval.String(),
+func dalConfigToInternal(c DALChainConfig) devchain.Config {
+	return devchain.Config{
+		ProjectRoot:      c.ProjectRoot,
+		ChainName:        c.ChainName,
+		Namespace:        c.Namespace,
+		DABridgeRPC:      c.DABridgeRPC,
+		DAAuthToken:      c.DAAuthToken,
+		CleanOnStart:     c.CleanOnStart,
+		CleanOnExit:      c.CleanOnExit,
+		LogLevel:         c.LogLevel,
+		BlockTime:        c.BlockTime,
+		SubmitInterval:   c.SubmitInterval,
+		Stdout:           c.Stdout,
+		Stderr:           c.Stderr,
+		SequencerRPC:     c.SequencerRPC,
+		FullNodeRPC:      c.FullNodeRPC,
+		SequencerExecURL: c.SequencerExecURL,
+		FullNodeExecURL:  c.FullNodeExecURL,
 	}
 }
 
-func waitForLive(ctx context.Context, url string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 3 * time.Second}
-
-	for time.Now().Before(deadline) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err == nil {
-			resp, doErr := client.Do(req)
-			if doErr == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					return nil
-				}
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(1 * time.Second):
-		}
+func dalConfigFromInternal(dc devchain.Config) DALChainConfig {
+	return DALChainConfig{
+		ProjectRoot:      dc.ProjectRoot,
+		ChainName:        dc.ChainName,
+		Namespace:        dc.Namespace,
+		DABridgeRPC:      dc.DABridgeRPC,
+		DAAuthToken:      dc.DAAuthToken,
+		CleanOnStart:     dc.CleanOnStart,
+		CleanOnExit:      dc.CleanOnExit,
+		LogLevel:         dc.LogLevel,
+		BlockTime:        dc.BlockTime,
+		SubmitInterval:   dc.SubmitInterval,
+		Stdout:           dc.Stdout,
+		Stderr:           dc.Stderr,
+		SequencerRPC:     dc.SequencerRPC,
+		FullNodeRPC:      dc.FullNodeRPC,
+		SequencerExecURL: dc.SequencerExecURL,
+		FullNodeExecURL:  dc.FullNodeExecURL,
 	}
-
-	return fmt.Errorf("timeout waiting for %s", url)
-}
-
-func orDefault(value, fallback string) string {
-	if strings.TrimSpace(value) != "" {
-		return value
-	}
-	return fallback
 }

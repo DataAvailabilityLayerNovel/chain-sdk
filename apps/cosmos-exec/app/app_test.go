@@ -57,7 +57,7 @@ func TestAppLifecycleAndIBCRoutingSmoke(t *testing.T) {
 		t.Fatalf("ibc router missing %q route", ibctransfertypes.ModuleName)
 	}
 
-	application.InitChainWithDefaultGenesis()
+	application.InitChainWithDefaultGenesis("")
 
 	application.BeginBlock(abci.RequestBeginBlock{
 		Header: tmproto.Header{

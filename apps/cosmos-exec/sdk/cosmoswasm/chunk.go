@@ -1,21 +1,14 @@
 package cosmoswasm
 
 import (
-	"crypto/sha256"
-	"errors"
-	"fmt"
+	ichunk "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/chunk"
 )
 
 const (
 	// DefaultMaxChunkSize is the default per-chunk size limit (512 KiB).
 	// Mirrors the 500 KiB reference in Celestia gas calculator docs, rounded
 	// to a power-of-two for alignment.
-	DefaultMaxChunkSize = 512 * 1024
-
-	// chunkHeaderSize is the overhead per chunk (4-byte index + 4-byte total +
-	// 32-byte original-data SHA-256).  Kept small so nearly all of MaxChunkSize
-	// is usable payload.
-	chunkHeaderSize = 40
+	DefaultMaxChunkSize = ichunk.DefaultMaxSize
 )
 
 // ChunkMeta describes a set of chunks produced from a single oversized blob.
@@ -37,69 +30,27 @@ type ChunkMeta struct {
 // (limitBatchBySize) but operates on a single blob before it reaches the
 // batch/DA layer.
 func ChunkBlob(data []byte, maxChunkSize int) ([][]byte, *ChunkMeta) {
-	if maxChunkSize <= 0 {
-		maxChunkSize = DefaultMaxChunkSize
+	chunks, meta := ichunk.Split(data, maxChunkSize)
+	if meta == nil {
+		return chunks, nil
 	}
-	if len(data) <= maxChunkSize {
-		return [][]byte{data}, nil
-	}
-
-	chunks := splitBytes(data, maxChunkSize)
-
-	h := sha256.Sum256(data)
-	commitments := make([]string, len(chunks))
-	for i, c := range chunks {
-		ch := sha256.Sum256(c)
-		commitments[i] = fmt.Sprintf("%x", ch[:])
-	}
-
 	return chunks, &ChunkMeta{
-		OriginalHash:     fmt.Sprintf("%x", h[:]),
-		TotalChunks:      len(chunks),
-		ChunkCommitments: commitments,
+		OriginalHash:     meta.OriginalHash,
+		TotalChunks:      meta.TotalChunks,
+		ChunkCommitments: meta.ChunkCommitments,
 	}
 }
 
 // ReassembleChunks concatenates ordered chunks back into the original blob.
 // If meta is non-nil, a SHA-256 integrity check is performed.
 func ReassembleChunks(chunks [][]byte, meta *ChunkMeta) ([]byte, error) {
-	if len(chunks) == 0 {
-		return nil, errors.New("no chunks to reassemble")
-	}
-
-	total := 0
-	for _, c := range chunks {
-		total += len(c)
-	}
-
-	buf := make([]byte, 0, total)
-	for _, c := range chunks {
-		buf = append(buf, c...)
-	}
-
+	var imeta *ichunk.Meta
 	if meta != nil {
-		h := sha256.Sum256(buf)
-		got := fmt.Sprintf("%x", h[:])
-		if got != meta.OriginalHash {
-			return nil, fmt.Errorf("integrity check failed: expected %s got %s", meta.OriginalHash, got)
+		imeta = &ichunk.Meta{
+			OriginalHash:     meta.OriginalHash,
+			TotalChunks:      meta.TotalChunks,
+			ChunkCommitments: meta.ChunkCommitments,
 		}
 	}
-
-	return buf, nil
-}
-
-// splitBytes divides data into slices of at most size bytes.
-func splitBytes(data []byte, size int) [][]byte {
-	var chunks [][]byte
-	for len(data) > 0 {
-		end := size
-		if end > len(data) {
-			end = len(data)
-		}
-		chunk := make([]byte, end)
-		copy(chunk, data[:end])
-		chunks = append(chunks, chunk)
-		data = data[end:]
-	}
-	return chunks
+	return ichunk.Reassemble(chunks, imeta)
 }

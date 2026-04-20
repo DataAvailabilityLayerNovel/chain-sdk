@@ -9,7 +9,11 @@
       "Bash(ls apps/cosmos-exec/executor/*.go)",
       "Bash(ls apps/cosmos-exec/cmd/cosmos-exec-grpc/*.go)",
       "Bash(wc -l apps/cosmos-exec/sdk/cosmoswasm/*.go)",
-      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\" apps/cosmos-exec/sdk/cosmoswasm/*.go)"
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\" apps/cosmos-exec/sdk/cosmoswasm/*.go)",
+      "Bash(wc -l /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/docs/*.md /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/README.md)",
+      "Bash(grep -n '^func\\\\|^type\\\\|^var\\\\|^const' *.go)",
+      "Bash(sort -t: -k2)",
+      "Bash(go vet:*)"
     ]
   }
 }

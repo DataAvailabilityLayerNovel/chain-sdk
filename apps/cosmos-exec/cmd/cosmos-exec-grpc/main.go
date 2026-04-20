@@ -81,15 +81,20 @@ func main() {
 		cfg.PersistBlobs = true
 		cfg.PersistTxResults = true
 	}
+	var persistErr error
 	if cfg.PersistBlobs || cfg.PersistTxResults {
 		persistDir := cfg.ResolveDataDir()
 		if persistDir != "" {
-			opts = append(opts, executor.WithPersistence(persistDir))
+			opts = append(opts, executor.WithPersistence(persistDir, &persistErr))
 			logger.Info("persistence enabled", "dir", persistDir)
 		}
 	}
 
 	cosmosExecutor := executor.New(application, opts...)
+	if persistErr != nil {
+		logger.Error("persistence replay failed", "error", persistErr)
+		os.Exit(1)
+	}
 	m := newMetrics()
 
 	handler := execgrpc.NewExecutorServiceHandlerWithMux(cosmosExecutor, func(mux *http.ServeMux) {

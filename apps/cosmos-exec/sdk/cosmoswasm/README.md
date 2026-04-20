@@ -1,374 +1,133 @@
-# Go Cosmos WASM SDK
+# cosmoswasm — Go SDK for Modular Rollup on Celestia
 
-SDK `cosmoswasm` dùng để:
+Build CosmWasm app-chains on ev-node with Celestia DA. Submit transactions, store blobs off-chain, query smart contracts, and manage namespace-isolated data — all from Go.
 
-1. Start dApp chain Cosmos WASM trên DAL với `chain name` + `namespace` riêng.
-2. Build và submit tx WASM (`store`, `instantiate`, `execute`).
-3. Query tx result và query smart contract.
-
-Package:
-
-`github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm`
-
-
----
-
-
-### ⚡ Quick Note: CLI Alternative
-
-Không muốn viết Go code? Sử dụng **CLI tool** thay vì SDK programmatically:
-
-```bash
-cd apps/cosmos-exec
-go build -o dal-sdk ./cmd/dal-sdk
-
-# Start chain
-./dal-sdk chain start --name mychain --namespace myns --da-rpc <url> --project-root /path/to/ev-node
-
-# Deploy contract (store + instantiate)
-./dal-sdk contract deploy --wasm ./contract.wasm --init-msg '{"count":0}' --rpc http://127.0.0.1:50051
-
-# Execute/query/check balance (CW20)
-./dal-sdk contract execute --contract cosmos1... --msg '{"transfer":{"recipient":"cosmos1...","amount":"10"}}' --rpc http://127.0.0.1:50051
-./dal-sdk contract query --contract cosmos1... --msg '{"token_info":{}}' --rpc http://127.0.0.1:50051
-./dal-sdk contract balance --contract cosmos1... --address cosmos1... --rpc http://127.0.0.1:50051
-
-# Submit signed tx and check result
-./dal-sdk tx submit --tx-base64 "<tx_base64>" --rpc http://127.0.0.1:50051 --wait
-./dal-sdk tx result --hash <tx_hash> --rpc http://127.0.0.1:50051
 ```
-
-## 1) Cài đặt
-
-```bash
 go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
 ```
 
-## 2) Yêu cầu trước khi chạy
+## What This SDK Does
 
-- Bạn đang ở repo `ev-node` (hoặc có `EVNODE_PROJECT_ROOT` trỏ đúng repo root).
-- DA endpoint hợp lệ (`DA_BRIDGE_RPC`) và token (`DA_AUTH_TOKEN` nếu endpoint yêu cầu).
-- Port local trống: `50051`, `50052`, `38331`, `48331`, `7860`, `7861`.
+| Capability | Description |
+|------------|-------------|
+| **Transaction** | Build, submit, and poll CosmWasm transactions (store code, instantiate, execute) |
+| **Blob storage** | Store large data off-chain, get a SHA-256 commitment to record on-chain (32 bytes) |
+| **Batch + Merkle** | Upload N blobs, get one Merkle root; prove any blob's inclusion offline |
+| **Smart query** | Read contract state without submitting a transaction |
+| **DA namespace** | Isolate your app-chain's blobs on Celestia via dedicated namespace |
+| **Cost estimation** | Compare gas: direct on-chain embedding vs blob-first pattern |
 
-Dọn nhanh port trước khi chạy:
+## Quick Start (5 minutes)
 
-```bash
-pkill -f cosmos-exec-grpc || true
-pkill -f evcosmos || true
-pkill -f run-cosmos-wasm-nodes.go || true
-```
-
-## 3) Danh sách API/lệnh trong SDK
-
-### 3.1 Chain API (DAL dApp chain)
-
-- `DefaultDALChainConfig(projectRoot)`
-  - Tạo config mặc định để start chain.
-- `StartDALChain(ctx, cfg)`
-  - Start sequencer + fullnode + execution services qua runner.
-  - Trả về `DALChainProcess` gồm endpoint runtime.
-- `(*DALChainProcess).Stop()`
-  - Stop process chain đã start.
-
-`DALChainConfig` quan trọng:
-
-- `ProjectRoot` → đường dẫn root repo `ev-node`
-- `ChainName` → map vào `--chain-id`
-- `Namespace` → map vào `DA_NAMESPACE`
-- `DABridgeRPC` → map vào `DA_BRIDGE_RPC` + `DA_RPC`
-- `DAAuthToken` → map vào `DA_AUTH_TOKEN`
-- `CleanOnStart`, `CleanOnExit`, `LogLevel`, `BlockTime`, `SubmitInterval`
-
-### 3.2 Contract API (WASM tx/query)
-
-- Tx builders:
-  - `BuildStoreTx(wasmBytes, sender)`
-  - `BuildInstantiateTx(InstantiateTxRequest)`
-  - `BuildExecuteTx(ExecuteTxRequest)`
-- Submit/query:
-  - `NewClient(execAPIURL)`
-  - `SubmitTxBase64(ctx, txB64)`
-  - `SubmitTxBytes(ctx, txBytes)`
-  - `GetTxResult(ctx, txHash)`
-  - `WaitTxResult(ctx, txHash, pollInterval)`
-  - `QuerySmartRaw(ctx, contract, msg)`
-  - `QuerySmart(ctx, contract, msg)`
-
-### 3.3 Helpers
-
-- `DefaultSender()`
-- `EncodeTxBase64(tx)`
-- `EncodeTxHex(tx)`
-
-## 4) Quickstart chạy được ngay (copy-paste)
-
-### 4.1 Start chain (không deploy contract)
-
-File runnable:
-
-- `sdk/cosmoswasm/examples/dapp-chain/main.go`
-
-Lệnh chạy:
+**Step 1** — Start the executor:
 
 ```bash
 cd apps/cosmos-exec
-
-export EVNODE_PROJECT_ROOT=/absolute/path/to/ev-node
-export CHAIN_NAME=my-dapp-chain
-export DA_NAMESPACE=my-dapp-namespace
-export DA_BRIDGE_RPC=https://<celestia-bridge-rpc>
-export DA_AUTH_TOKEN=<token>
-
-go run ./sdk/cosmoswasm/examples/dapp-chain
+go run ./cmd/cosmos-exec-grpc --in-memory
 ```
 
-Nếu bạn chạy từ trong repo `ev-node`, có thể bỏ `EVNODE_PROJECT_ROOT` (example tự dò root).
-
-### 4.2 Start chain + deploy contract (1 lệnh)
-
-File runnable:
-
-- `sdk/cosmoswasm/examples/dapp-chain-deploy/main.go`
-
-Lệnh chạy:
-
-```bash
-cd apps/cosmos-exec
-
-export EVNODE_PROJECT_ROOT=/absolute/path/to/ev-node
-export CHAIN_NAME=my-dapp-chain
-export DA_NAMESPACE=my-dapp-namespace
-export DA_BRIDGE_RPC=https://<celestia-bridge-rpc>
-export DA_AUTH_TOKEN=<token>
-
-# Optional
-# export WASM_FILE=/absolute/path/to/contract.wasm
-# export WASM_URL=https://.../contract.wasm
-# export LABEL=my-contract-label
-# export INIT_MSG='{"name":"Token","symbol":"TOK","decimals":6,...}'
-
-go run ./sdk/cosmoswasm/examples/dapp-chain-deploy
-```
-
-Output kỳ vọng của deploy example:
-
-- `store_tx_hash=...`
-- `instantiate_tx_hash=...`
-- `code_id=...`
-- `contract_addr=...`
-
-## 5) Ví dụ dùng SDK trong code app của bạn
+**Step 2** — Run this code (or copy into your `main.go`):
 
 ```go
-ctx := context.Background()
+package main
 
-cfg := cosmoswasm.DefaultDALChainConfig("/absolute/path/to/ev-node")
-cfg.ChainName = "my-dapp-chain"
-cfg.Namespace = "my-dapp-namespace"
-cfg.DABridgeRPC = "https://<celestia-bridge-rpc>"
-cfg.DAAuthToken = "<token>"
+import (
+    "context"
+    "fmt"
+    "log"
 
-proc, err := cosmoswasm.StartDALChain(ctx, cfg)
-if err != nil {
-	panic(err)
+    cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
+)
+
+func main() {
+    client := cosmoswasm.NewClient("http://127.0.0.1:50051")
+    ctx := context.Background()
+
+    // 1. Store a blob off-chain
+    res, err := client.SubmitBlob(ctx, []byte(`{"event":"player_moved","x":10,"y":20}`))
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("commitment:", res.Commitment)
+
+    // 2. Retrieve it
+    data, err := client.RetrieveBlobData(ctx, res.Commitment)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("data:", string(data))
+
+    // 3. Batch upload + Merkle proof
+    batch, _ := client.SubmitBatch(ctx, [][]byte{
+        []byte(`{"move":"e2e4"}`),
+        []byte(`{"move":"e7e5"}`),
+    })
+    proof, _ := cosmoswasm.GetProof(batch.Commitments, 0)
+    _ = cosmoswasm.VerifyMerkleProof(proof)
+    fmt.Println("batch root:", batch.Root)
+    fmt.Println("proof verified")
 }
-defer proc.Stop()
-
-client := cosmoswasm.NewClient(proc.Endpoints.SequencerExecAPI)
-
-execTx, err := cosmoswasm.BuildExecuteTx(cosmoswasm.ExecuteTxRequest{
-	Sender:   cosmoswasm.DefaultSender(),
-	Contract: "cosmos1...",
-	Msg:      `{"transfer":{"recipient":"cosmos1...","amount":"1"}}`,
-})
-if err != nil {
-	panic(err)
-}
-
-submit, err := client.SubmitTxBytes(ctx, execTx)
-if err != nil {
-	panic(err)
-}
-
-result, err := client.WaitTxResult(ctx, submit.Hash, time.Second)
-if err != nil {
-	panic(err)
-}
-
-_ = result
 ```
 
-## 6) Health check / verify chain đang chạy
-
-Sau khi start chain:
+**Step 3** — Run:
 
 ```bash
-curl -sS http://127.0.0.1:38331/health/live
-curl -sS http://127.0.0.1:48331/health/live
+go run main.go
 ```
 
-Xem latest block:
+More runnable examples in [`examples/`](examples/):
+
+| Example | What it shows | Requires |
+|---------|--------------|----------|
+| [`quickstart`](examples/quickstart/main.go) | Blobs, proofs, cost estimation, compression | Executor `--in-memory` |
+| [`deploy-contract`](examples/deploy-contract/main.go) | Full contract lifecycle: store, instantiate, execute, query | Executor or E2E stack |
+| [`contract-interaction`](examples/contract-interaction/main.go) | Hackatom + reflect, sub-messages, blob roots on-chain | Full E2E stack |
+| [`game-telemetry`](examples/game-telemetry/main.go) | Batch submit, chunking, compression, cost comparison | Executor `--in-memory` |
+| [`dapp-chain`](examples/dapp-chain/main.go) | Start full DAL chain with DA + sequencer | DA bridge endpoint |
+| [`dapp-chain-deploy`](examples/dapp-chain-deploy/main.go) | Start chain + auto-deploy contract | DA bridge endpoint |
+
+## Swagger API Docs
+
+The executor has built-in Swagger UI:
+
+```
+http://127.0.0.1:50051/swagger        # Interactive UI
+http://127.0.0.1:50051/swagger.json   # OpenAPI 3.0.3 spec (Postman/Insomnia import)
+```
+
+Quick curl check:
 
 ```bash
-cd /absolute/path/to/ev-node
-./scripts/contracts/wasm-rpc.sh latest-block
+curl http://127.0.0.1:50051/status
+curl -X POST http://127.0.0.1:50051/blob/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"data_base64":"aGVsbG8gd29ybGQ="}'
 ```
 
-## 7) Troubleshooting nhanh
+## Documentation
 
-- `required port ... already in use`
-  - Dọn process cũ bằng 3 lệnh `pkill` ở phần Yêu cầu.
-- `DA_BRIDGE_RPC is required`
-  - Chưa set env `DA_BRIDGE_RPC`.
-- `DA preflight unauthorized (401)` hoặc permission error
-  - Token sai/hết hạn/thiếu quyền đọc blob.
-- Chain chạy nhưng fullnode có warn `height is equal to 0`
-  - Đây là cảnh báo DA follower có thể xuất hiện theo điều kiện sync; kiểm tra thêm log `da_submitter` và `da_height` ở sequencer.
+| Guide | What's inside |
+|-------|---------------|
+| [Configuration](docs/configuration.md) | All SDK + server config fields, env vars, dev/staging/prod profiles |
+| [API Reference](docs/api-reference.md) | Every public method: params, response, errors, example code |
+| [Error Handling](docs/error-handling.md) | Error classification, retry policy, mapping errors to app actions |
+| [Production Guide](docs/production-guide.md) | Timeout/retry tuning, auth, rate limiting, idempotency, SLOs |
+| [Troubleshooting](docs/troubleshooting.md) | Common failures, diagnostic curl commands, debug checklist |
 
-## 8) Test SDK
+## Testing
 
 ```bash
 cd apps/cosmos-exec
 go test ./sdk/cosmoswasm/...
 ```
 
-## 9) SDK này khác gì với npm package? Cách dùng như thế nào?
+Use mocks for unit tests (no running executor needed):
 
-### 9.1 So sánh nhanh
+```go
+mock := cosmoswasm.NewMockClient()
+res, _ := mock.SubmitBlob(ctx, []byte("test"))
+data, _ := mock.RetrieveBlobData(ctx, res.Commitment)
 
-| Đặc điểm | npm package | Go SDK này |
-|----------|-------------|-----------|
-| **Ngôn ngữ** | JavaScript/TypeScript | Go |
-| **Import** | `npm install` + `import` | `go get` + `import` |
-| **Cách dùng** | Thêm vào project sẵn | Go app riêng hoặc thư viện |
-| **CLI** | Có (ví dụ ethers CLI) | Có (`dal-sdk`) |
-| **Kích thước** | Nhỏ (JS files) | Nặng (binary Go executable) |
-| **Performance** | Chậm hơn (interpreted) | Nhanh (compiled) |
-
-**SDK này là Go module** — không phải npm package. Nếu bạn muốn JS/TS version, có thể:
-- Dùng **CLI `dal-sdk`** (recommend nếu chỉ cần API call ngắn gọn).
-- Wrap SDK này qua gRPC/HTTP để JS client call.
-- Viết riêng JS SDK tương tự (future work).
-
-### 9.2 Cách user dùng Go SDK (3 hình thức)
-
-#### 🔹 **Hình thức 1: Dùng CLI (dễ nhất, không viết code)**
-
-```bash
-# Build CLI
-cd apps/cosmos-exec
-go build -o dal-sdk ./cmd/dal-sdk
-
-# Chạy lệnh
-./dal-sdk chain start --name mychain --namespace myns --da-rpc <url>
-./dal-sdk contract deploy --wasm ./contract.wasm --init-msg '{}' --rpc http://127.0.0.1:50051
-./dal-sdk contract query --contract cosmos1... --msg '{}' --rpc http://127.0.0.1:50051
+daMock := cosmoswasm.NewMockDAClient()
+bridge := cosmoswasm.NewDABridge(daMock, mock, cosmoswasm.NamespaceFromString("test"))
 ```
-
-**Dùng khi:** Người dùng chỉ cần nhanh chóng deploy/test contract, không cần app logic phức tạp.
-
-#### 🔹 **Hình thức 2: Go app dùng SDK (viết code Go)**
-
-```bash
-# Step 1: Tạo Go app mới
-mkdir my-dapp
-cd my-dapp
-go mod init github.com/myuser/my-dapp
-
-# Step 2: Import SDK
-cat > main.go << 'EOF'
-package main
-
-import (
-	"context"
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
-)
-
-func main() {
-	ctx := context.Background()
-	
-	// Config chain
-	cfg := cosmoswasm.DefaultDALChainConfig("./ev-node")
-	cfg.ChainName = "my-chain"
-	cfg.Namespace = "my-namespace"
-	cfg.DABridgeRPC = "https://..."
-	cfg.DAAuthToken = "<token>"
-	
-	// Start chain
-	proc, _ := cosmoswasm.StartDALChain(ctx, cfg)
-	defer proc.Stop()
-	
-	// Use SDK
-	client := cosmoswasm.NewClient(proc.Endpoints.SequencerExecAPI)
-	// ...
-}
-EOF
-
-# Step 3: Download SDK dependency
-go mod tidy
-
-# Step 4: Chạy app
-go run main.go
-```
-
-**Dùng khi:** Người dùng cần build app dApp (backend service, bot, dashboard) tích hợp logic riêng.
-
-#### 🔹 **Hình thức 3: Dùng Go SDK trong project sẵn (thêm vào codebase)**
-
-Nếu đã có Go project (service BE, API gateway):
-
-```bash
-# Thêm dependency vào go.mod
-go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
-
-# Dùng trong code hiện tại
-import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
-
-// Tích hợp vào luồng app
-func deployContractHandler(w http.ResponseWriter, r *http.Request) {
-	client := cosmoswasm.NewClient("http://127.0.0.1:50051")
-	result, err := client.SubmitTxBase64(r.Context(), txB64)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-}
-```
-
-**Dùng khi:** Người dùng có sẵn backend cần tích hợp DAL chain functionality.
-
-### 9.3 Cách import chính xác trong Go
-
-**Tùy nơi bạn import từ:**
-
-1. **Nếu import từ EVNode repo (dev):**
-   ```go
-	import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
-   ```
-	- Require: `go.mod` có `require github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec v0.x.x`
-
-2. **Nếu publish lên GitHub (production):**
-   ```go
-	import "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
-   ```
-   - (Cần setup `go.mod` ở chain-sdk repo riêng)
-
-### 9.4 Vì sao là Go không phải JS?
-
-- ✅ **Go** → compiled, fast, dùng được cho backend + CLI + daemon.
-- ❌ **JS** → interpreted, slower, chỉ tốt cho browser/frontend.
-
-**Nếu user cần JS:**
-- Dùng **CLI `dal-sdk`** qua shell script hoặc HTTP wrapper.
-- Hoặc gọi Go SDK qua **gRPC/REST gateway** từ JS code.
-
-### 9.5 Tổng kết
-
-| Mục đích | Dùng cái gì | Yêu cầu |
-|----------|------------|--------|
-| **Test nhanh** | CLI `dal-sdk` | Không cần code, chỉ cần shell |
-| **Build backend service** | Go app + SDK | Go installed, dùng `go get` |
-| **Thêm vào service sẵn** | Import SDK | Go project hoặc service |
-| **Web app (JS/React)** | CLI via shell hoặc HTTP wrapper | JS exec shell / fetch API |

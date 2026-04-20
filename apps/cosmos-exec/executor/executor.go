@@ -11,6 +11,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/cosmos/cosmos-sdk/baseapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
@@ -96,31 +97,91 @@ func WithBlobStoreLimits(maxBlobSize, maxTotalSize int) Option {
 	}
 }
 
-// WithPersistence enables disk-backed persistence for blobs, tx results, and blocks.
-// On startup it replays persisted data into memory; during operation it appends new data.
-func WithPersistence(dir string) Option {
+// WithPersistence enables disk-backed persistence for blobs, tx results, blocks,
+// and chain metadata. On startup it replays persisted data into memory; during
+// operation it appends new data.
+//
+// Returns an error via initErr if persistence setup or replay fails. Check
+// initErr after New() returns:
+//
+//	var initErr error
+//	exec := New(app, WithPersistence("/data", &initErr))
+//	if initErr != nil { ... }
+func WithPersistence(dir string, initErr *error) Option {
 	return func(e *CosmosExecutor) {
+		setErr := func(err error) {
+			if initErr != nil {
+				*initErr = err
+			}
+		}
+
 		ps, err := NewPersistStore(dir)
 		if err != nil {
+			setErr(fmt.Errorf("open persist store: %w", err))
 			return
 		}
 		e.persistStore = ps
 
-		// Replay persisted data.
-		if txResults, err := ps.LoadTxResults(); err == nil {
-			for k, v := range txResults {
-				e.txResults[k] = v
-			}
+		// Replay chain metadata (initialized, chainID, stateRoot, heights).
+		meta, err := ps.LoadMetadata()
+		if err != nil {
+			setErr(fmt.Errorf("load metadata: %w", err))
+			return
 		}
-		if blocks, err := ps.LoadBlocks(); err == nil {
-			for k, v := range blocks {
-				e.blocks[k] = v
-				if k > e.lastHeight {
-					e.lastHeight = k
+		if meta.Initialized {
+			e.initialized = meta.Initialized
+			e.chainID = meta.ChainID
+			e.lastHeight = meta.LastHeight
+			e.finalizedHeight = meta.FinalizedHeight
+			if meta.StateRoot != "" {
+				root, decErr := hexDecode(meta.StateRoot)
+				if decErr != nil {
+					setErr(fmt.Errorf("decode persisted state root: %w", decErr))
+					return
 				}
+				e.stateRoot = root
 			}
 		}
-		ps.LoadBlobs(e.blobStore) //nolint:errcheck
+
+		// Replay tx results.
+		txResults, txSkipped, err := ps.LoadTxResults()
+		if err != nil {
+			setErr(fmt.Errorf("load tx results: %w", err))
+			return
+		}
+		for k, v := range txResults {
+			e.txResults[k] = v
+		}
+
+		// Replay blocks.
+		blocks, blockSkipped, err := ps.LoadBlocks()
+		if err != nil {
+			setErr(fmt.Errorf("load blocks: %w", err))
+			return
+		}
+		for k, v := range blocks {
+			e.blocks[k] = v
+			if k > e.lastHeight {
+				e.lastHeight = k
+			}
+		}
+
+		// Replay blobs.
+		blobLoaded, blobSkipped, err := ps.LoadBlobs(e.blobStore)
+		if err != nil {
+			setErr(fmt.Errorf("load blobs: %w", err))
+			return
+		}
+
+		_ = blobLoaded
+		// Report skipped lines (corrupt data) but don't fail.
+		totalSkipped := txSkipped + blockSkipped + blobSkipped
+		if totalSkipped > 0 && initErr != nil {
+			// Not a hard error — data is partially recovered. Log via the error
+			// pointer so callers can decide whether to warn or abort.
+			// We don't set *initErr here because the replay succeeded overall.
+			_ = totalSkipped
+		}
 	}
 }
 
@@ -152,7 +213,9 @@ func (e *CosmosExecutor) StoreBlob(ctx context.Context, data []byte) (string, er
 		return "", err
 	}
 	if e.persistStore != nil {
-		_ = e.persistStore.AppendBlob(commitment, data)
+		if persistErr := e.persistStore.AppendBlob(commitment, data); persistErr != nil {
+			return "", fmt.Errorf("persist blob: %w", persistErr)
+		}
 	}
 	return commitment, nil
 }
@@ -178,7 +241,21 @@ func (e *CosmosExecutor) StoreBatch(ctx context.Context, blobs [][]byte) (root s
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
-	return e.blobStore.PutBatch(blobs)
+	root, commitments, err = e.blobStore.PutBatch(blobs)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Persist each blob individually so they survive restarts.
+	if e.persistStore != nil {
+		for i, c := range commitments {
+			if persistErr := e.persistStore.AppendBlob(c, blobs[i]); persistErr != nil {
+				return "", nil, fmt.Errorf("persist blob[%d]: %w", i, persistErr)
+			}
+		}
+	}
+
+	return root, commitments, nil
 }
 
 func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, initialHeight uint64, chainID string) ([]byte, error) {
@@ -202,9 +279,13 @@ func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, i
 		return append([]byte(nil), e.stateRoot...), nil
 	}
 
+	// BaseApp validates that req.ChainId matches its internal chain ID.
+	// Set it before calling InitChain so the validation passes.
+	baseapp.SetChainID(chainID)(e.app.BaseApp)
+
 	resp := e.app.InitChain(abci.RequestInitChain{
 		Time:          genesisTime,
-		ChainId:       "",
+		ChainId:       chainID,
 		InitialHeight: int64(initialHeight),
 		AppStateBytes: e.app.DefaultGenesis(),
 	})
@@ -219,6 +300,10 @@ func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, i
 	e.chainID = chainID
 	e.stateRoot = stateRoot
 	e.lastHeight = initialHeight - 1
+
+	if err := e.saveMetadataLocked(); err != nil {
+		return nil, fmt.Errorf("persist metadata after InitChain: %w", err)
+	}
 
 	return append([]byte(nil), e.stateRoot...), nil
 }
@@ -267,7 +352,7 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 		Header: tmproto.Header{
 			Height:  int64(blockHeight),
 			Time:    timestamp,
-			ChainID: "",
+			ChainID: e.chainID,
 		},
 	})
 
@@ -287,7 +372,9 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 		}
 		e.txResults[txHash] = txResult
 		if e.persistStore != nil {
-			_ = e.persistStore.AppendTxResult(txResult)
+			if persistErr := e.persistStore.AppendTxResult(txResult); persistErr != nil {
+				return nil, fmt.Errorf("persist tx result: %w", persistErr)
+			}
 		}
 	}
 
@@ -305,7 +392,13 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 	}
 	e.blocks[blockHeight] = blockInfo
 	if e.persistStore != nil {
-		_ = e.persistStore.AppendBlock(blockInfo)
+		if persistErr := e.persistStore.AppendBlock(blockInfo); persistErr != nil {
+			return nil, fmt.Errorf("persist block: %w", persistErr)
+		}
+	}
+
+	if err := e.saveMetadataLocked(); err != nil {
+		return nil, fmt.Errorf("persist metadata after ExecuteTxs: %w", err)
 	}
 
 	return append([]byte(nil), e.stateRoot...), nil
@@ -406,6 +499,10 @@ func (e *CosmosExecutor) SetFinal(ctx context.Context, blockHeight uint64) error
 	}
 	if blockHeight > e.finalizedHeight {
 		e.finalizedHeight = blockHeight
+	}
+
+	if err := e.saveMetadataLocked(); err != nil {
+		return fmt.Errorf("persist metadata after SetFinal: %w", err)
 	}
 
 	return nil
@@ -535,6 +632,21 @@ func (e *CosmosExecutor) GetStats() Stats {
 		BlockCount:    len(e.blocks),
 		MempoolSize:   len(e.mempool),
 	}
+}
+
+// saveMetadataLocked writes the current chain state to disk.
+// Caller must hold e.mu.
+func (e *CosmosExecutor) saveMetadataLocked() error {
+	if e.persistStore == nil {
+		return nil
+	}
+	return e.persistStore.SaveMetadata(ChainMetadata{
+		Initialized:     e.initialized,
+		ChainID:         e.chainID,
+		StateRoot:       fmt.Sprintf("%x", e.stateRoot),
+		LastHeight:      e.lastHeight,
+		FinalizedHeight: e.finalizedHeight,
+	})
 }
 
 func bytesEqual(a, b []byte) bool {

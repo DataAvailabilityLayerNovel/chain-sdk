@@ -44,7 +44,8 @@ type GameEvent struct {
 
 type PlayerUpdate struct {
 	ID    string  `json:"id"`
-	X, Y  float64 `json:"x,y"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
 	Score int     `json:"score"`
 }
 

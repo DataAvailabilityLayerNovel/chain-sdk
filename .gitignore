@@ -35,14 +35,34 @@ docs/.vitepress/cache
 
 # local cosmos/evcosmos runtime state
 .evcosmos-*/
-.cosmos-exec-*/
-.cosmos-exec-wasm/
+.cosmos-exec*/
 .cosmos-wasm-runner/
+**/.cosmos-exec*/
 
-# local wasm cache created by tests/executor
-**/.cosmos-exec-wasm/
+# LevelDB / runtime databases
+**/*.ldb
+**/LOCK
+**/CURRENT
+**/CURRENT.bak
+**/MANIFEST-*
+**/application.db/
 
-# local binaries
+# local binaries — never commit compiled artifacts
 run-cosmos-wasm-nodes
 apps/cosmos-exec/cosmos-exec-grpc
+apps/cosmos-exec/dal-sdk
+apps/cosmos-exec/deploy-contract
+apps/cosmos-exec/contract-interaction
+apps/cosmos-exec/game-telemetry
+apps/cosmos-exec/dapp-chain
+apps/cosmos-exec/dapp-chain-deploy
+apps/cosmos-exec/quickstart
+
+# JSONL persistence files
+**/*.jsonl
+
+# Data / explorer state
+.data/
+
+# Jupyter
 rm.ipynb

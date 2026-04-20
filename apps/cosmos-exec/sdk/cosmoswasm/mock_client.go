@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/merkle"
 )
 
 // MockExecutorClient implements ExecutorClient for unit testing without a
@@ -234,7 +236,7 @@ func (m *MockExecutorClient) CommitRoot(ctx context.Context, req CommitRootReque
 	}, nil
 }
 
-// mockMerkleRoot is a minimal implementation for the mock.
+// mockMerkleRoot delegates to the internal merkle package.
 func mockMerkleRoot(commitments []string) string {
 	if len(commitments) == 0 {
 		return ""
@@ -245,31 +247,15 @@ func mockMerkleRoot(commitments []string) string {
 
 	layer := make([][]byte, len(commitments))
 	for i, c := range commitments {
-		b := make([]byte, 32)
-		for j := 0; j < 32 && j*2+1 < len(c); j++ {
-			var v byte
-			fmt.Sscanf(c[j*2:j*2+2], "%02x", &v)
-			b[j] = v
+		b, err := merkle.HexTo32(c)
+		if err != nil {
+			return ""
 		}
 		layer[i] = b
 	}
 
-	for len(layer) > 1 {
-		var next [][]byte
-		for i := 0; i < len(layer); i += 2 {
-			left := layer[i]
-			right := left
-			if i+1 < len(layer) {
-				right = layer[i+1]
-			}
-			combined := append(left, right...)
-			h := sha256.Sum256(combined)
-			next = append(next, h[:])
-		}
-		layer = next
-	}
-
-	return fmt.Sprintf("%x", layer[0])
+	root := merkle.ComputeRoot(layer)
+	return fmt.Sprintf("%x", root)
 }
 
 // Compile-time check.

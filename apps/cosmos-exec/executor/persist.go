@@ -8,11 +8,14 @@ import (
 	"sync"
 )
 
-// PersistStore provides optional disk-backed persistence for tx results,
-// block info, and blob metadata. Each type is stored as a JSON-lines file
-// that is replayed on startup and appended to during operation.
-
-// PersistStore wraps file-based append-only storage.
+// PersistStore provides disk-backed persistence for executor state:
+//   - metadata.json: chain identity and latest checkpoint (initialized, chainID, stateRoot, heights)
+//   - tx_results.jsonl: append-only tx execution results
+//   - blocks.jsonl: append-only block info
+//   - blobs.jsonl: append-only blob data
+//
+// On startup, all files are replayed into memory. During operation, new data
+// is appended. Metadata is overwritten (not appended) on every state change.
 type PersistStore struct {
 	dir string
 	mu  sync.Mutex
@@ -20,6 +23,15 @@ type PersistStore struct {
 	txFile    *os.File
 	blockFile *os.File
 	blobFile  *os.File
+}
+
+// ChainMetadata holds the executor's critical state that must survive restarts.
+type ChainMetadata struct {
+	Initialized     bool   `json:"initialized"`
+	ChainID         string `json:"chain_id"`
+	StateRoot       string `json:"state_root"`       // hex-encoded
+	LastHeight      uint64 `json:"last_height"`
+	FinalizedHeight uint64 `json:"finalized_height"`
 }
 
 type persistedTxResult struct {
@@ -129,82 +141,134 @@ func (p *PersistStore) AppendBlob(commitment string, data []byte) error {
 	return err
 }
 
+// SaveMetadata writes the chain metadata to disk (overwrite, not append).
+// Called after InitChain, ExecuteTxs, and SetFinal.
+func (p *PersistStore) SaveMetadata(meta ChainMetadata) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	path := filepath.Join(p.dir, "metadata.json")
+	tmpPath := path + ".tmp"
+
+	// Atomic write: write to temp, then rename.
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("write metadata.json.tmp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename metadata.json: %w", err)
+	}
+	return nil
+}
+
+// LoadMetadata reads the chain metadata from disk.
+// Returns a zero-value ChainMetadata and nil error if the file does not exist.
+func (p *PersistStore) LoadMetadata() (ChainMetadata, error) {
+	data, err := os.ReadFile(filepath.Join(p.dir, "metadata.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ChainMetadata{}, nil
+		}
+		return ChainMetadata{}, fmt.Errorf("read metadata.json: %w", err)
+	}
+
+	var meta ChainMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ChainMetadata{}, fmt.Errorf("parse metadata.json: %w", err)
+	}
+	return meta, nil
+}
+
 // LoadTxResults reads all persisted tx results.
-func (p *PersistStore) LoadTxResults() (map[string]TxExecutionResult, error) {
+// Returns an error for I/O failures; corrupt lines are skipped with a count.
+func (p *PersistStore) LoadTxResults() (map[string]TxExecutionResult, int, error) {
 	results := make(map[string]TxExecutionResult)
 	data, err := os.ReadFile(filepath.Join(p.dir, "tx_results.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return results, nil
+			return results, 0, nil
 		}
-		return nil, err
+		return nil, 0, fmt.Errorf("read tx_results.jsonl: %w", err)
 	}
 
+	skipped := 0
 	for _, line := range splitLines(data) {
 		if len(line) == 0 {
 			continue
 		}
 		var rec persistedTxResult
 		if err := json.Unmarshal(line, &rec); err != nil {
+			skipped++
 			continue
 		}
 		results[rec.Data.Hash] = rec.Data
 	}
-	return results, nil
+	return results, skipped, nil
 }
 
 // LoadBlocks reads all persisted block infos.
-func (p *PersistStore) LoadBlocks() (map[uint64]BlockInfo, error) {
+// Returns an error for I/O failures; corrupt lines are skipped with a count.
+func (p *PersistStore) LoadBlocks() (map[uint64]BlockInfo, int, error) {
 	blocks := make(map[uint64]BlockInfo)
 	data, err := os.ReadFile(filepath.Join(p.dir, "blocks.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return blocks, nil
+			return blocks, 0, nil
 		}
-		return nil, err
+		return nil, 0, fmt.Errorf("read blocks.jsonl: %w", err)
 	}
 
+	skipped := 0
 	for _, line := range splitLines(data) {
 		if len(line) == 0 {
 			continue
 		}
 		var rec persistedBlock
 		if err := json.Unmarshal(line, &rec); err != nil {
+			skipped++
 			continue
 		}
 		blocks[rec.Data.Height] = rec.Data
 	}
-	return blocks, nil
+	return blocks, skipped, nil
 }
 
 // LoadBlobs reads all persisted blobs into the given BlobStore.
-func (p *PersistStore) LoadBlobs(store *BlobStore) (int, error) {
+// Returns an error for I/O failures; corrupt lines are skipped with a count.
+func (p *PersistStore) LoadBlobs(store *BlobStore) (loaded int, skipped int, err error) {
 	data, err := os.ReadFile(filepath.Join(p.dir, "blobs.jsonl"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			return 0, 0, nil
 		}
-		return 0, err
+		return 0, 0, fmt.Errorf("read blobs.jsonl: %w", err)
 	}
 
-	count := 0
 	for _, line := range splitLines(data) {
 		if len(line) == 0 {
 			continue
 		}
 		var rec persistedBlob
 		if err := json.Unmarshal(line, &rec); err != nil {
+			skipped++
 			continue
 		}
 		blobData, err := hexDecode(rec.DataHex)
 		if err != nil {
+			skipped++
 			continue
 		}
-		if _, err := store.Put(blobData); err == nil {
-			count++
+		if _, err := store.Put(blobData); err != nil {
+			skipped++
+			continue
 		}
+		loaded++
 	}
-	return count, nil
+	return loaded, skipped, nil
 }
 
 func splitLines(data []byte) [][]byte {
