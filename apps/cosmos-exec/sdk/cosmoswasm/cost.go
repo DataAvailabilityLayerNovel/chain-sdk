@@ -7,25 +7,21 @@ const DefaultMaxBlobSize = 4 * 1024 * 1024
 
 // Celestia DA gas constants — mirrors docs/guides/celestia-gas-calculator.md
 // and Celestia's DefaultEstimateGas logic.
+// These are unexported because they are implementation details of EstimateCost;
+// changes to the Celestia gas model should not require a major version bump.
 const (
-	// CelestiaFixedGas is the base gas cost per PayForBlobs submission.
-	CelestiaFixedGas uint64 = 65_000
-	// CelestiaGasPerByte is the gas charged for each byte of blob data.
-	CelestiaGasPerByte uint64 = 8
-	// CelestiaShareSize is the share alignment size (bytes).
-	CelestiaShareSize uint64 = 480
+	celestiaFixedGas    uint64 = 65_000 // base gas per PayForBlobs submission
+	celestiaGasPerByte  uint64 = 8      // gas per byte of blob data
+	celestiaShareSize   uint64 = 480    // share alignment size (bytes)
 )
 
 // Cosmos SDK on-chain gas constants — conservative estimates for CosmWasm
-// execute messages on a sovereign rollup.  These depend on the specific chain
-// configuration; the values here are a reasonable default.
+// execute messages on a sovereign rollup.  Unexported for the same reason
+// as the Celestia constants above.
 const (
-	// CosmosBaseTxGas is the flat per-tx overhead (signature verify, ante handler).
-	CosmosBaseTxGas uint64 = 200_000
-	// CosmosGasPerMsgByte is the incremental gas per byte of the MsgExecuteContract.Msg field.
-	CosmosGasPerMsgByte uint64 = 10
-	// CosmosGasPerStoreByte is the incremental gas per byte written to contract KV state.
-	CosmosGasPerStoreByte uint64 = 30
+	cosmosBaseTxGas       uint64 = 200_000 // flat per-tx overhead
+	cosmosGasPerMsgByte   uint64 = 10      // per byte of MsgExecuteContract.Msg
+	cosmosGasPerStoreByte uint64 = 30      // per byte written to contract KV state
 )
 
 // CostBreakdown itemises the gas cost of a single storage approach.
@@ -102,9 +98,9 @@ func EstimateCost(req EstimateCostRequest) *CostEstimate {
 	}
 
 	// --- Approach 1: Direct on-chain (all data in WASM messages) -------------
-	directOnChainGas := CosmosBaseTxGas +
-		uint64(rawSize)*CosmosGasPerMsgByte +
-		uint64(rawSize)*CosmosGasPerStoreByte
+	directOnChainGas := cosmosBaseTxGas +
+		uint64(rawSize)*cosmosGasPerMsgByte +
+		uint64(rawSize)*cosmosGasPerStoreByte
 	directDA := celestiaGas(uint64(rawSize))
 	directTotal := directDA + directOnChainGas
 
@@ -116,7 +112,7 @@ func EstimateCost(req EstimateCostRequest) *CostEstimate {
 
 	blobDAGas := uint64(numBatches) * celestiaGas(uint64(compressedSize/numBatches))
 	// On-chain cost: one MsgExecuteContract with a tiny JSON root message (~128 B).
-	blobOnChainGas := CosmosBaseTxGas + 128*CosmosGasPerMsgByte + 32*CosmosGasPerStoreByte
+	blobOnChainGas := cosmosBaseTxGas + 128*cosmosGasPerMsgByte + 32*cosmosGasPerStoreByte
 	blobTotal := blobDAGas + blobOnChainGas
 
 	savings := 0.0
@@ -148,11 +144,11 @@ func EstimateCost(req EstimateCostRequest) *CostEstimate {
 // Mirrors DefaultEstimateGas: fixed + ceil(dataBytes / shareSize) * shareSize * gasPerByte.
 func celestiaGas(dataBytes uint64) uint64 {
 	if dataBytes == 0 {
-		return CelestiaFixedGas
+		return celestiaFixedGas
 	}
-	shares := (dataBytes + CelestiaShareSize - 1) / CelestiaShareSize
-	paddedBytes := shares * CelestiaShareSize
-	return CelestiaFixedGas + paddedBytes*CelestiaGasPerByte
+	shares := (dataBytes + celestiaShareSize - 1) / celestiaShareSize
+	paddedBytes := shares * celestiaShareSize
+	return celestiaFixedGas + paddedBytes*celestiaGasPerByte
 }
 
 // gasToTIA converts gas to TIA fee.  gasPrice is in uTIA/gas.

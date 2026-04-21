@@ -18,10 +18,7 @@ import "time"
 // │ DefaultCompress         │ true              │ Gzip in BatchBuilder               │
 // │ DefaultPollInterval     │ 1 s               │ WaitTxResult polling               │
 // │ DefaultTxTimeout        │ 60 s              │ Suggested per-tx context timeout    │
-// │ CelestiaFixedGas        │ 65 000            │ EstimateCost base gas              │
-// │ CelestiaGasPerByte      │ 8                 │ EstimateCost per-byte gas          │
-// │ CelestiaShareSize       │ 480 B             │ EstimateCost share alignment       │
-// │ CosmosBaseTxGas         │ 200 000           │ EstimateCost per-tx overhead       │
+// │ (internal gas consts)   │ see cost.go       │ EstimateCost internals (unexported) │
 // └─────────────────────────┴───────────────────┴────────────────────────────────────┘
 
 const (

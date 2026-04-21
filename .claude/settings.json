@@ -13,7 +13,9 @@
       "Bash(wc -l /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/docs/*.md /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/README.md)",
       "Bash(grep -n '^func\\\\|^type\\\\|^var\\\\|^const' *.go)",
       "Bash(sort -t: -k2)",
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(grep -n '^func ' sdk/cosmoswasm/*.go)",
+      "Bash(go doc:*)"
     ]
   }
 }
