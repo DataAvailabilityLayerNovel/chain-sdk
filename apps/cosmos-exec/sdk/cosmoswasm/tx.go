@@ -9,7 +9,7 @@ import (
 
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/txcodec"
+	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/txcodec"
 )
 
 // DefaultSender returns a deterministic placeholder sender address.

@@ -15,7 +15,19 @@
       "Bash(sort -t: -k2)",
       "Bash(go vet:*)",
       "Bash(grep -n '^func ' sdk/cosmoswasm/*.go)",
-      "Bash(go doc:*)"
+      "Bash(go doc:*)",
+      "Bash(just proto-gen:*)",
+      "Bash(buf generate:*)",
+      "Bash(go list:*)",
+      "Bash(go mod:*)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/go.work*)",
+      "Bash(git checkout:*)",
+      "Bash(find . -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/*.go)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/executor/*.go)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/app/*.go)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-wasm/cmd/*.go)",
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/docs/thesis*)"
     ]
   }
 }

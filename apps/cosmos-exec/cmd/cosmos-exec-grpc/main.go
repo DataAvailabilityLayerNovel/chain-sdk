@@ -20,11 +20,11 @@ import (
 	db "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/config"
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
-	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
-	execgrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc"
+	"github.com/evstack/ev-node/apps/cosmos-exec/app"
+	"github.com/evstack/ev-node/apps/cosmos-exec/config"
+	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
+	cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	execgrpc "github.com/evstack/ev-node/execution/grpc"
 )
 
 func main() {
@@ -115,6 +115,9 @@ func main() {
 		mux.HandleFunc("/ready", readyHandler(cosmosExecutor))
 		mux.HandleFunc("/metrics", metricsHandler(cosmosExecutor, m))
 		mux.HandleFunc("/metrics.json", metricsJSONHandler(cosmosExecutor, m))
+		mux.HandleFunc("/exec/height", execHeightHandler(cosmosExecutor))
+		mux.HandleFunc("/exec/rollback", execRollbackHandler(cosmosExecutor))
+		mux.HandleFunc("/exec/prune", execPruneHandler(cosmosExecutor))
 		mux.HandleFunc("/swagger", swaggerUIHandler())
 		mux.HandleFunc("/swagger.json", swaggerJSONHandler())
 	})
@@ -728,6 +731,94 @@ func readyHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			"latest_height":    status.LatestHeight,
 			"finalized_height": status.FinalizedHeight,
 		})
+	}
+}
+
+// ── Executor optional interface handlers ────────────────────────────────────
+
+func execHeightHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		height, err := exec.GetLatestHeight(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"height": height})
+	}
+}
+
+type rollbackRequest struct {
+	TargetHeight uint64 `json:"target_height"`
+}
+
+func execRollbackHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+
+		var req rollbackRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		if req.TargetHeight == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target_height must be > 0"})
+			return
+		}
+
+		if err := exec.Rollback(r.Context(), req.TargetHeight); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+type pruneRequest struct {
+	Height uint64 `json:"height"`
+}
+
+func execPruneHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+
+		var req pruneRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		if err := exec.PruneExec(r.Context(), req.Height); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
 

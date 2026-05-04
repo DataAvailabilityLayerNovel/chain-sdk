@@ -182,12 +182,15 @@ curl -X POST http://127.0.0.1:50051/blob/submit \
 
 | Guide | What's inside |
 |-------|---------------|
+| [Getting Started](docs/getting-started.md) | End-to-end: start chain, deploy .wasm contract, interact via SDK |
+| [Architecture](docs/architecture.md) | Project structure: every folder/file, data flow, key interfaces |
 | [Configuration](docs/configuration.md) | All SDK + server config fields, env vars, dev/staging/prod profiles |
 | [API Reference](docs/api-reference.md) | Every public method: params, response, errors, example code |
 | [Error Handling](docs/error-handling.md) | Error classification, retry policy, mapping errors to app actions |
 | [Production Guide](docs/production-guide.md) | Timeout/retry tuning, auth, rate limiting, idempotency, SLOs |
 | [Troubleshooting](docs/troubleshooting.md) | Common failures, diagnostic curl commands, debug checklist |
 | [Migration Guide](docs/migration.md) | v0.2→v0.3 changes, internal separation, v1.0 plan |
+| [Chain Runtime Flow](docs/chain-flow.md) | Tx lifecycle, block production, DA submission, node sync, P2P |
 
 ## Testing
 

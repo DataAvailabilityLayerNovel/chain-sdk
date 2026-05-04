@@ -12,7 +12,6 @@ import (
 	"github.com/evstack/ev-node/block"
 	"github.com/evstack/ev-node/core/execution"
 	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	executiongrpc "github.com/evstack/ev-node/execution/grpc"
 	"github.com/evstack/ev-node/node"
 	rollcmd "github.com/evstack/ev-node/pkg/cmd"
 	"github.com/evstack/ev-node/pkg/config"
@@ -100,7 +99,7 @@ func createExecutionClient(cmd *cobra.Command) (execution.Executor, error) {
 		return nil, fmt.Errorf("%s flag is required", FlagGrpcExecutorURL)
 	}
 
-	return executiongrpc.NewClient(executorURL), nil
+	return NewEnhancedExecutorClient(executorURL), nil
 }
 
 func createSequencer(

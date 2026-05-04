@@ -36,7 +36,7 @@ import (
 	"github.com/cosmos/gogoproto/proto"
 
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
-	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
+	cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 func main() {

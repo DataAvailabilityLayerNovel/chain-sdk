@@ -1,7 +1,7 @@
 package cosmoswasm
 
 import (
-	ichunk "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/chunk"
+	ichunk "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/chunk"
 )
 
 const (

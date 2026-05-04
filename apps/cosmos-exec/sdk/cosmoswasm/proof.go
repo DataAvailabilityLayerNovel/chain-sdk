@@ -3,7 +3,7 @@ package cosmoswasm
 import (
 	"errors"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/merkle"
+	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/merkle"
 )
 
 // MerkleProof is an inclusion proof showing that a blob with a given commitment

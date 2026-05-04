@@ -1,0 +1,1037 @@
+# Getting Started: Deploy Chain & Deploy Your CosmWasm Contract
+
+Hướng dẫn từ đầu đến cuối cho developer muốn:
+
+1. Viết smart contract bằng Rust
+2. Compile ra `.wasm`
+3. Start rollup chain trên Celestia DA
+4. Deploy contract lên chain
+5. Interact qua SDK
+
+---
+
+## Phase 1 — Chuẩn bị môi trường
+
+### 1.1. Cài đặt tools
+
+```bash
+# Go 1.25.6+
+go version
+
+# Rust + wasm target (để compile contract)
+rustup target add wasm32-unknown-unknown
+
+# (Optional) wasm optimizer
+docker pull cosmwasm/rust-optimizer:0.16.0
+```
+
+### 1.2. Clone ev-node repo
+
+```bash
+git clone https://github.com/DataAvailabilityLayerNovel/chain-sdk.git ev-node
+cd ev-node
+```
+
+Verify:
+
+```bash
+ls scripts/run-cosmos-wasm-nodes.go   # phải tồn tại
+ls apps/cosmos-exec/sdk/cosmoswasm/   # SDK package
+```
+
+### 1.3. Chạy Celestia light node
+
+SDK cần một Celestia light node để submit data lên DA layer.
+
+```bash
+# Cài celestia node (xem https://docs.celestia.org)
+celestia light start --p2p.network mocha
+
+# Lấy auth token
+celestia light auth admin --p2p.network mocha
+# Output: eyJhbGciOiJIUzI1NiIs...  ← copy token này
+
+# Verify node chạy
+curl -s http://localhost:26658/header/1
+```
+
+---
+
+## Phase 2 — Viết và compile CosmWasm contract
+
+### 2.1. Tạo contract project
+
+Nếu chưa có contract, tạo contract counter đơn giản:
+
+```bash
+# Tạo từ template
+cargo generate --git https://github.com/CosmWasm/cw-template.git --name my-counter
+cd my-counter
+```
+hoặc
+
+```bash
+# filepath:
+git clone https://github.com/CosmWasm/cw-template.git my-counter
+cd my-counter
+```
+Project structure:
+
+```
+my-counter/
+├── Cargo.toml
+├── src/
+│   ├── contract.rs      # logic: instantiate, execute, query
+│   ├── msg.rs           # InstantiateMsg, ExecuteMsg, QueryMsg
+│   ├── state.rs         # contract state (count, owner)
+│   ├── error.rs         # custom errors
+│   └── lib.rs           # entry point
+```
+
+### 2.2. Ví dụ contract counter
+
+**src/msg.rs:**
+
+```rust
+use cosmwasm_schema::{cw_serde, QueryResponses};
+
+#[cw_serde]
+pub struct InstantiateMsg {
+    pub count: i32,
+}
+
+#[cw_serde]
+pub enum ExecuteMsg {
+    Increment {},
+    Reset { count: i32 },
+}
+
+#[cw_serde]
+#[derive(QueryResponses)]
+pub enum QueryMsg {
+    #[returns(CountResponse)]
+    GetCount {},
+}
+
+#[cw_serde]
+pub struct CountResponse {
+    pub count: i32,
+}
+```
+
+**src/state.rs:**
+
+```rust
+use cosmwasm_std::Addr;
+use cw_storage_plus::Item;
+
+pub const COUNT: Item<i32> = Item::new("count");
+pub const OWNER: Item<Addr> = Item::new("owner");
+```
+
+**src/contract.rs:**
+
+```rust
+use cosmwasm_std::{
+    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+};
+use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{COUNT, OWNER};
+
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut, _env: Env, info: MessageInfo, msg: InstantiateMsg,
+) -> StdResult<Response> {
+    COUNT.save(deps.storage, &msg.count)?;
+    OWNER.save(deps.storage, &info.sender)?;
+    Ok(Response::new().add_attribute("method", "instantiate").add_attribute("count", msg.count.to_string()))
+}
+
+#[entry_point]
+pub fn execute(
+    deps: DepsMut, _env: Env, _info: MessageInfo, msg: ExecuteMsg,
+) -> StdResult<Response> {
+    match msg {
+        ExecuteMsg::Increment {} => {
+            COUNT.update(deps.storage, |c| -> StdResult<_> { Ok(c + 1) })?;
+            Ok(Response::new().add_attribute("action", "increment"))
+        }
+        ExecuteMsg::Reset { count } => {
+            COUNT.save(deps.storage, &count)?;
+            Ok(Response::new().add_attribute("action", "reset"))
+        }
+    }
+}
+
+#[entry_point]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::GetCount {} => {
+            let count = COUNT.load(deps.storage)?;
+            to_json_binary(&CountResponse { count })
+        }
+    }
+}
+```
+
+### 2.3. Compile sang .wasm
+
+```bash
+cd my-counter
+
+# Compile
+cargo wasm
+# Output: target/wasm32-unknown-unknown/release/my_counter.wasm
+
+# (Recommended) Optimize — giảm size ~10x
+docker run --rm -v "$(pwd)":/code cosmwasm/rust-optimizer:0.16.0
+# Output: artifacts/my_counter.wasm  (~200KB thay vì ~2MB)
+```
+
+Verify file .wasm:
+
+```bash
+ls -lh artifacts/my_counter.wasm
+file artifacts/my_counter.wasm
+# Output: WebAssembly (wasm) binary module version 0x1 (MVP)
+```
+
+---
+
+## Phase 3 — Tạo Go project sử dụng SDK
+
+### 3.1. Tạo project structure
+
+```bash
+mkdir my-dapp && cd my-dapp
+go mod init my-dapp
+```
+
+```bash
+# Cài SDK
+go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
+```
+
+### 3.2. Tạo project structure — từng bước chi tiết
+
+Mục tiêu tạo ra cấu trúc sau:
+
+```
+my-dapp/
+├── go.mod                       # Go module file
+├── go.sum                       # (tự generate khi go mod tidy)
+├── .env                         # Celestia config
+├── artifacts/
+│   └── my_counter.wasm          # Contract compiled ở Phase 2
+└── main.go                      # App code (deploy + interact)
+```
+
+#### Bước 1: Tạo thư mục project
+
+```bash
+# Tạo thư mục gốc
+mkdir my-dapp
+cd my-dapp
+```
+
+#### Bước 2: Khởi tạo Go module
+
+```bash
+go mod init my-dapp
+```
+
+Lệnh này tạo file `go.mod` với nội dung:
+
+```
+module my-dapp
+
+go 1.25.6
+```
+
+#### Bước 3: Cài SDK dependency
+
+```bash
+go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+```
+
+Lệnh này:
+- Thêm `require github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm vX.X.X` vào `go.mod`
+- Tạo file `go.sum` (chứa checksums của tất cả dependencies)
+
+> **Nếu develop local** (chưa publish lên GitHub), dùng `replace` directive thay thế:
+>
+> ```bash
+> # Thêm vào cuối go.mod
+> echo 'replace github.com/evstack/ev-node/apps/cosmos-exec => /path/to/ev-node/apps/cosmos-exec' >> go.mod
+> go mod tidy
+> ```
+
+#### Bước 4: Tạo thư mục artifacts và copy contract
+
+```bash
+# Tạo thư mục chứa file .wasm
+mkdir -p artifacts
+
+# Copy file .wasm đã compile ở Phase 2
+cp /path/to/my-counter/artifacts/my_counter.wasm artifacts/
+
+# Verify
+ls -lh artifacts/my_counter.wasm
+# Output: -rw-r--r--  1 user  staff   200K  my_counter.wasm
+```
+
+> **Chưa có contract?** Có thể skip bước này và chỉ dùng blob/query features trước.
+> Xem [examples/quickstart](../examples/quickstart/) — không cần contract.
+
+#### Bước 5: Tạo file .env
+
+```bash
+cat > .env << 'EOF'
+# Celestia light node RPC endpoint
+DA_BRIDGE_RPC=http://localhost:26658
+
+# Auth token (lấy từ: celestia light auth admin --p2p.network mocha)
+DA_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIs...
+
+# Namespace riêng cho app (cô lập data trên DA layer)
+DA_NAMESPACE=my-counter-app
+EOF
+```
+
+| Variable | Mô tả | Lấy ở đâu |
+|----------|-------|------------|
+| `DA_BRIDGE_RPC` | Celestia light node RPC | Mặc định `http://localhost:26658` |
+| `DA_AUTH_TOKEN` | Auth token cho Celestia | Chạy `celestia light auth admin --p2p.network mocha` |
+| `DA_NAMESPACE` | Namespace riêng cho app (cô lập data trên DA layer) | Tự đặt, ví dụ `my-counter-app` |
+
+> **Lưu ý:** Thêm `.env` vào `.gitignore` để không commit secret lên git:
+> ```bash
+> echo ".env" >> .gitignore
+> ```
+
+#### Bước 6: Tạo file main.go
+
+```bash
+touch main.go
+```
+
+Mở `main.go` bằng editor, paste code ở [Phase 5 — Section 5.1](#51-file-maingo-hoàn-chỉnh) bên dưới.
+
+Hoặc tạo file tối giản để verify SDK hoạt động:
+
+```go
+// main.go — verify SDK connection
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+)
+
+func main() {
+    client := cosmoswasm.NewClient("http://127.0.0.1:50051")
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    // Test 1: Submit blob
+    res, err := client.SubmitBlob(ctx, []byte("Hello from my-dapp!"))
+    if err != nil {
+        log.Fatalf("submit blob failed: %v", err)
+    }
+    fmt.Printf("Blob stored! commitment: %s\n", res.Commitment)
+
+    // Test 2: Retrieve blob
+    data, err := client.RetrieveBlobData(ctx, res.Commitment)
+    if err != nil {
+        log.Fatalf("retrieve blob failed: %v", err)
+    }
+    fmt.Printf("Retrieved: %s\n", string(data))
+
+    // Test 3: Cost estimate
+    est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: 1024})
+    fmt.Printf("1KB on-chain: %d gas, blob-first: %d gas (%.0f%% cheaper)\n",
+        est.DirectTx.TotalGas, est.BlobCommit.TotalGas, est.SavingsPercent)
+}
+```
+
+#### Bước 7: Download dependencies và verify
+
+```bash
+# Download tất cả dependencies
+go mod tidy
+
+# Verify build thành công
+go build .
+
+# (Optional) Chạy thử — cần chain đang chạy (Phase 4)
+go run main.go
+```
+
+#### Kết quả: cấu trúc project hoàn chỉnh
+
+```bash
+$ tree my-dapp/
+my-dapp/
+├── .env                         # ← Bước 5: Celestia config
+├── .gitignore                   # ← Bước 5: ignore .env
+├── artifacts/
+│   └── my_counter.wasm          # ← Bước 4: contract bytecode (200KB)
+├── go.mod                       # ← Bước 2+3: module + SDK dependency
+├── go.sum                       # ← Bước 7: auto-generated checksums
+└── main.go                      # ← Bước 6: app code
+
+$ cat go.mod
+module my-dapp
+
+go 1.25.6
+
+require (
+    github.com/evstack/ev-node/apps/cosmos-exec v0.3.0
+)
+```
+
+#### Tóm tắt lệnh (copy-paste chạy liền)
+
+```bash
+# === Tạo project trong 7 lệnh ===
+mkdir my-dapp && cd my-dapp
+go mod init my-dapp
+go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+mkdir -p artifacts
+cp /path/to/my-counter/artifacts/my_counter.wasm artifacts/
+cat > .env << 'EOF'
+DA_BRIDGE_RPC=http://localhost:26658
+DA_AUTH_TOKEN=<paste-token-here>
+DA_NAMESPACE=my-counter-app
+EOF
+echo ".env" >> .gitignore
+# → Tạo main.go (xem Phase 5)
+# → go mod tidy && go run main.go
+```
+
+---
+
+## Phase 4 — Start chain
+
+Có 2 cách:
+
+### Cách A: Start chain bằng script (terminal riêng)
+
+Cần clone ev-node repo (Phase 1.2). Chạy ở terminal riêng:
+
+```bash
+cd /path/to/ev-node
+
+# Load .env
+export $(cat /path/to/my-dapp/.env | xargs)
+
+# Start full E2E stack
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go \
+  --clean-on-start=true \
+  --block-time=2s
+```
+
+Chờ log:
+
+```
+Cosmos/WASM stack is running
+- sequencer execution gRPC: http://127.0.0.1:50051
+- full execution gRPC: http://127.0.0.1:50052
+```
+
+Verify:
+
+```bash
+curl -s http://127.0.0.1:50051/status | python3 -m json.tool
+# "initialized": true, "healthy": true, "latest_height" tăng dần
+```
+
+### Cách B: Start chain từ trong Go code (programmatic)
+
+Không cần terminal riêng — chain chạy cùng process với app:
+
+```go
+// Trong main.go
+cfg := cosmoswasm.DefaultDALChainConfig("/path/to/ev-node")
+cfg.ChainName    = "my-counter-chain"
+cfg.Namespace    = os.Getenv("DA_NAMESPACE")
+cfg.DABridgeRPC  = os.Getenv("DA_BRIDGE_RPC")
+cfg.DAAuthToken  = os.Getenv("DA_AUTH_TOKEN")
+cfg.CleanOnStart = true
+cfg.BlockTime    = 2 * time.Second
+
+proc, err := cosmoswasm.StartDALChain(ctx, cfg)
+if err != nil {
+    log.Fatal(err)
+}
+defer proc.Stop()
+
+// Chain đã ready, dùng proc.Endpoints.SequencerExecAPI làm URL
+client := cosmoswasm.NewClient(proc.Endpoints.SequencerExecAPI)
+```
+
+> **Lưu ý:** Cách B cần ev-node repo đã clone (vì `DefaultDALChainConfig` tham chiếu tới `scripts/run-cosmos-wasm-nodes.go`). Path truyền vào là đường dẫn tới thư mục gốc của ev-node repo.
+
+---
+
+## Phase 5 — Deploy contract + Interact
+
+### 5.1. File main.go hoàn chỉnh
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "strconv"
+    "strings"
+    "time"
+
+    cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
+)
+
+func main() {
+    client := cosmoswasm.NewClient("http://127.0.0.1:50051")
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+    defer cancel()
+
+    // ──────────────────────────────────────────────────────────
+    // Step 1: Store WASM code
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("Step 1 — Store WASM code")
+
+    wasmBytes, err := os.ReadFile("artifacts/my_counter.wasm")
+    if err != nil {
+        log.Fatalf("read wasm file: %v", err)
+    }
+    fmt.Printf("  wasm size: %d bytes\n", len(wasmBytes))
+
+    storeTx, err := cosmoswasm.BuildStoreTx(wasmBytes, "")
+    if err != nil {
+        log.Fatalf("build store tx: %v", err)
+    }
+
+    storeRes, err := client.SubmitTxBytes(ctx, storeTx)
+    if err != nil {
+        log.Fatalf("submit store tx: %v", err)
+    }
+    fmt.Printf("  tx_hash: %s\n", storeRes.Hash)
+
+    storeResult, err := client.WaitTxResult(ctx, storeRes.Hash, time.Second)
+    if err != nil {
+        log.Fatalf("wait store result: %v", err)
+    }
+    if storeResult.Code != 0 {
+        log.Fatalf("store failed: code=%d log=%s", storeResult.Code, storeResult.Log)
+    }
+
+    codeIDStr := findEventValue(storeResult.Events, "code_id")
+    codeID, _ := strconv.ParseUint(codeIDStr, 10, 64)
+    fmt.Printf("  code_id: %d (height=%d)\n", codeID, storeResult.Height)
+
+    // ──────────────────────────────────────────────────────────
+    // Step 2: Instantiate contract
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("\nStep 2 — Instantiate contract")
+
+    initTx, err := cosmoswasm.BuildInstantiateTx(cosmoswasm.InstantiateTxRequest{
+        CodeID: codeID,
+        Label:  "my-counter-instance",
+        Msg:    map[string]any{"count": 0},  // ← matches Rust InstantiateMsg
+    })
+    if err != nil {
+        log.Fatalf("build instantiate tx: %v", err)
+    }
+
+    initRes, err := client.SubmitTxBytes(ctx, initTx)
+    if err != nil {
+        log.Fatalf("submit instantiate tx: %v", err)
+    }
+
+    initResult, err := client.WaitTxResult(ctx, initRes.Hash, time.Second)
+    if err != nil {
+        log.Fatalf("wait instantiate result: %v", err)
+    }
+    if initResult.Code != 0 {
+        log.Fatalf("instantiate failed: code=%d log=%s", initResult.Code, initResult.Log)
+    }
+
+    contractAddr := findEventValue(initResult.Events, "_contract_address")
+    if contractAddr == "" {
+        contractAddr = findEventValue(initResult.Events, "contract_address")
+    }
+    fmt.Printf("  contract: %s (height=%d)\n", contractAddr, initResult.Height)
+
+    // ──────────────────────────────────────────────────────────
+    // Step 3: Execute — increment counter
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("\nStep 3 — Execute: increment")
+
+    execTx, err := cosmoswasm.BuildExecuteTx(cosmoswasm.ExecuteTxRequest{
+        Contract: contractAddr,
+        Msg:      map[string]any{"increment": struct{}{}},  // ← matches Rust ExecuteMsg
+    })
+    if err != nil {
+        log.Fatalf("build execute tx: %v", err)
+    }
+
+    execRes, err := client.SubmitTxBytes(ctx, execTx)
+    if err != nil {
+        log.Fatalf("submit execute tx: %v", err)
+    }
+
+    execResult, err := client.WaitTxResult(ctx, execRes.Hash, time.Second)
+    if err != nil {
+        log.Fatalf("wait execute result: %v", err)
+    }
+    if execResult.Code != 0 {
+        log.Fatalf("execute failed: code=%d log=%s", execResult.Code, execResult.Log)
+    }
+    fmt.Printf("  success at height=%d\n", execResult.Height)
+
+    // ──────────────────────────────────────────────────────────
+    // Step 4: Query — get count
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("\nStep 4 — Query: get_count")
+
+    result, err := client.QuerySmart(ctx, contractAddr, map[string]any{
+        "get_count": struct{}{},  // ← matches Rust QueryMsg
+    })
+    if err != nil {
+        log.Fatalf("query: %v", err)
+    }
+    fmt.Printf("  count = %v\n", result["count"])
+
+    // ──────────────────────────────────────────────────────────
+    // Step 5: Store data off-chain (blob-first pattern)
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("\nStep 5 — Blob-first: store events off-chain")
+
+    events := [][]byte{
+        []byte(`{"event":"game_start","ts":1}`),
+        []byte(`{"event":"player_move","ts":2,"x":10}`),
+        []byte(`{"event":"game_end","ts":3,"score":9999}`),
+    }
+
+    receipt, err := client.CommitRoot(ctx, cosmoswasm.CommitRootRequest{
+        Blobs:    events,
+        Contract: contractAddr,
+        Tag:      "game-events",
+    })
+    if err != nil {
+        log.Fatalf("commit root: %v", err)
+    }
+    fmt.Printf("  merkle_root: %s\n", receipt.Root)
+    fmt.Printf("  tx_hash: %s\n", receipt.TxHash)
+    fmt.Printf("  blobs stored: %d (off-chain)\n", len(receipt.Refs))
+
+    // Verify Merkle proof
+    commitments := make([]string, len(receipt.Refs))
+    for i, ref := range receipt.Refs {
+        commitments[i] = ref.Commitment
+    }
+    proof, _ := cosmoswasm.GetProof(commitments, 0)
+    if err := cosmoswasm.VerifyMerkleProof(proof); err != nil {
+        log.Fatalf("proof invalid: %v", err)
+    }
+    fmt.Println("  merkle proof verified")
+
+    // ──────────────────────────────────────────────────────────
+    // Step 6: Cost comparison
+    // ──────────────────────────────────────────────────────────
+    fmt.Println("\nStep 6 — Cost comparison (1 MB data)")
+
+    est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: 1024 * 1024})
+    fmt.Printf("  direct on-chain: %d gas\n", est.DirectTx.TotalGas)
+    fmt.Printf("  blob + commit:   %d gas (%.0f%% cheaper)\n", est.BlobCommit.TotalGas, est.SavingsPercent)
+
+    fmt.Println("\nAll steps passed.")
+}
+
+func findEventValue(events []cosmoswasm.TxEvent, key string) string {
+    for _, event := range events {
+        for _, attr := range event.Attributes {
+            if strings.TrimSpace(attr.Key) == key && strings.TrimSpace(attr.Value) != "" {
+                return strings.TrimSpace(attr.Value)
+            }
+        }
+    }
+    return ""
+}
+```
+
+### 5.2. Chạy
+
+```bash
+cd my-dapp
+
+# Đảm bảo chain đang chạy (Phase 4)
+curl -s http://127.0.0.1:50051/status
+
+# Chạy app
+go run main.go
+```
+
+Output kỳ vọng:
+
+```
+Step 1 — Store WASM code
+  wasm size: 203847 bytes
+  tx_hash: a1b2c3d4...
+  code_id: 1 (height=3)
+
+Step 2 — Instantiate contract
+  contract: wasm1qg5ega6... (height=5)
+
+Step 3 — Execute: increment
+  success at height=7
+
+Step 4 — Query: get_count
+  count = 1
+
+Step 5 — Blob-first: store events off-chain
+  merkle_root: 9f8e7d6c...
+  tx_hash: b2c3d4e5...
+  blobs stored: 3 (off-chain)
+  merkle proof verified
+
+Step 6 — Cost comparison (1 MB data)
+  direct on-chain: 41240000 gas
+  blob + commit:   267240 gas (99% cheaper)
+
+All steps passed.
+```
+
+---
+
+## Phase 6 (Optional) — Chạy không cần Celestia (dev mode)
+
+Nếu chưa setup Celestia, dùng quick-deploy với example có sẵn:
+
+```bash
+cd /path/to/ev-node
+
+# Chạy dapp-chain-deploy example (tự download sample contract)
+export DA_BRIDGE_RPC=http://localhost:26658
+export DA_AUTH_TOKEN=<token>
+export DA_NAMESPACE=test
+
+go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy
+```
+
+Hoặc chạy quickstart example (chỉ blob + proof, không cần contract):
+
+```bash
+# Start chain trước (terminal 1)
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
+
+# Chạy quickstart (terminal 2)
+go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/quickstart
+```
+
+---
+
+## Phase 7 (Optional) — Swagger UI & API Explorer
+
+cosmos-exec-grpc có tích hợp sẵn **Swagger UI** (OpenAPI 3.0.3) để browse và test API trực tiếp từ trình duyệt.
+
+### 7.1. Truy cập Swagger
+
+Khi server đang chạy (mặc định port 50051):
+
+```
+Swagger UI:   http://127.0.0.1:50051/swagger
+OpenAPI JSON: http://127.0.0.1:50051/swagger.json
+```
+
+Mở trình duyệt tại `http://127.0.0.1:50051/swagger` → giao diện Swagger UI hiện ra với tất cả endpoints.
+
+### 7.2. Các nhóm API trên Swagger
+
+| Tag | Endpoints | Mô tả |
+|-----|-----------|-------|
+| **node** | `GET /status`, `GET /blocks/latest`, `GET /blocks/{height}` | Trạng thái chain, thông tin block |
+| **tx** | `POST /tx/submit`, `GET /tx/{hash}`, `GET /tx/result`, `GET /tx/pending` | Submit và tra cứu transaction |
+| **wasm** | `POST /wasm/query-smart` | Query CosmWasm smart contract (read-only) |
+| **blob** | `POST /blob/submit`, `GET /blob/retrieve`, `POST /blob/batch`, `POST /blob/estimate-cost` | Blob storage, batch, cost estimation |
+
+### 7.3. Test API từ Swagger UI
+
+**Ví dụ 1 — Xem trạng thái chain:**
+1. Mở Swagger UI
+2. Tìm `GET /status` trong nhóm **node**
+3. Click **Try it out** → **Execute**
+4. Response:
+```json
+{
+  "initialized": true,
+  "chain_id": "cosmos-wasm-test-chain",
+  "latest_height": 42,
+  "finalized_height": 40,
+  "healthy": true,
+  "synced": true
+}
+```
+
+**Ví dụ 2 — Submit blob:**
+1. Tìm `POST /blob/submit` trong nhóm **blob**
+2. Click **Try it out**
+3. Nhập body:
+```json
+{
+  "data_base64": "SGVsbG8gV29ybGQ="
+}
+```
+4. Click **Execute**
+5. Response:
+```json
+{
+  "commitment": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+  "size": 11
+}
+```
+
+**Ví dụ 3 — Query smart contract:**
+1. Tìm `POST /wasm/query-smart` trong nhóm **wasm**
+2. Nhập body:
+```json
+{
+  "contract": "cosmos14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9s4hmalr",
+  "msg": {"get_count": {}}
+}
+```
+3. Response:
+```json
+{
+  "data": {"count": 5}
+}
+```
+
+**Ví dụ 4 — Estimate cost (so sánh on-chain vs blob):**
+1. Tìm `POST /blob/estimate-cost`
+2. Nhập body:
+```json
+{
+  "data_bytes": 1048576
+}
+```
+3. Response cho thấy blob-first rẻ hơn ~99%
+
+### 7.4. Dùng Swagger JSON cho code generation
+
+Download OpenAPI spec và generate client code tự động:
+
+```bash
+# Download spec
+curl -s http://127.0.0.1:50051/swagger.json > openapi.json
+
+# Generate TypeScript client (ví dụ dùng openapi-generator)
+npx @openapitools/openapi-generator-cli generate \
+  -i openapi.json \
+  -g typescript-fetch \
+  -o ./generated-client
+
+# Generate Python client
+npx @openapitools/openapi-generator-cli generate \
+  -i openapi.json \
+  -g python \
+  -o ./generated-client-py
+```
+
+### 7.5. Test nhanh bằng curl (không cần Swagger UI)
+
+```bash
+# Status
+curl -s http://127.0.0.1:50051/status | jq
+
+# Submit blob
+curl -s -X POST http://127.0.0.1:50051/blob/submit \
+  -H "Content-Type: application/json" \
+  -d '{"data_base64":"SGVsbG8gV29ybGQ="}' | jq
+
+# Retrieve blob
+curl -s "http://127.0.0.1:50051/blob/retrieve?commitment=a591a6d..." | jq
+
+# Submit batch
+curl -s -X POST http://127.0.0.1:50051/blob/batch \
+  -H "Content-Type: application/json" \
+  -d '{"blobs_base64":["SGVsbG8=","V29ybGQ="]}' | jq
+
+# Query smart contract
+curl -s -X POST http://127.0.0.1:50051/wasm/query-smart \
+  -H "Content-Type: application/json" \
+  -d '{"contract":"cosmos14hj...","msg":{"get_count":{}}}' | jq
+
+# Estimate cost cho 1MB data
+curl -s -X POST http://127.0.0.1:50051/blob/estimate-cost \
+  -H "Content-Type: application/json" \
+  -d '{"data_bytes":1048576}' | jq
+
+# Submit transaction
+curl -s -X POST http://127.0.0.1:50051/tx/submit \
+  -H "Content-Type: application/json" \
+  -d '{"tx_base64":"CpQBCp..."}' | jq
+
+# Get tx result
+curl -s "http://127.0.0.1:50051/tx/result?hash=abc123..." | jq
+
+# Latest block
+curl -s http://127.0.0.1:50051/blocks/latest | jq
+
+# Block by height
+curl -s http://127.0.0.1:50051/blocks/42 | jq
+
+# Pending tx count
+curl -s http://127.0.0.1:50051/tx/pending | jq
+```
+
+### 7.6. Swagger với auth token (production)
+
+Khi server chạy với auth token (`--auth-token` hoặc `COSMOS_EXEC_AUTH_TOKEN`):
+
+```bash
+# Mọi request cần Bearer token
+curl -s http://127.0.0.1:50051/status \
+  -H "Authorization: Bearer my-secret-token" | jq
+
+# Swagger UI vẫn accessible (GET endpoints)
+# Nhưng POST endpoints cần thêm header Authorization
+```
+
+> **Lưu ý:** Swagger UI hiện chưa có ô nhập auth token tích hợp. Khi server bật auth, dùng curl hoặc Postman để test POST endpoints với header `Authorization: Bearer <token>`.
+
+### 7.7. Source code Swagger
+
+Swagger spec được generate programmatically trong Go (không dùng file YAML):
+
+| File | Vai trò |
+|------|---------|
+| [`cmd/cosmos-exec-grpc/swagger.go`](../../../cmd/cosmos-exec-grpc/swagger.go) | OpenAPI 3.0.3 spec + Swagger UI HTML |
+| [`cmd/cosmos-exec-grpc/main.go:121-122`](../../../cmd/cosmos-exec-grpc/main.go) | Register handlers: `/swagger` → UI, `/swagger.json` → spec |
+
+```go
+// main.go — handler registration
+mux.HandleFunc("/swagger", swaggerUIHandler())
+mux.HandleFunc("/swagger.json", swaggerJSONHandler())
+```
+
+Swagger UI load từ CDN (`unpkg.com/swagger-ui-dist@5`) — cần internet access lần đầu (browser cache sau đó).
+
+---
+
+## Tóm tắt: tất cả files cần tạo
+
+### Phía contract (Rust)
+
+```
+my-counter/
+├── Cargo.toml                   # [1] Rust dependencies
+├── src/
+│   ├── lib.rs                   # [2] Entry point
+│   ├── msg.rs                   # [3] InstantiateMsg, ExecuteMsg, QueryMsg
+│   ├── contract.rs              # [4] Business logic
+│   ├── state.rs                 # [5] State definitions
+│   └── error.rs                 # [6] Custom errors
+└── artifacts/
+    └── my_counter.wasm          # [output] Compiled contract
+```
+
+### Phía app (Go)
+
+```
+my-dapp/
+├── go.mod                       # [1] go mod init my-dapp
+├── .env                         # [2] DA_BRIDGE_RPC, DA_AUTH_TOKEN, DA_NAMESPACE
+├── artifacts/
+│   └── my_counter.wasm          # [3] Copy từ Rust project
+└── main.go                      # [4] App code (deploy + interact)
+```
+
+### Phía infrastructure
+
+```
+ev-node/                         # [clone] git clone .../chain-sdk.git ev-node
+├── scripts/
+│   └── run-cosmos-wasm-nodes.go # Chain runner (dùng cho Phase 4 cách A)
+├── apps/cosmos-exec/            # Execution engine (chain chạy ở đây)
+└── apps/cosmos-wasm/            # Full node binary
+```
+
+### Celestia (external)
+
+```
+~/.celestia-light-mocha/         # Celestia light node data
+# Chạy: celestia light start --p2p.network mocha
+# Token: celestia light auth admin --p2p.network mocha
+```
+
+---
+
+## Tóm tắt flow
+
+```
+[1] Rust contract  ──cargo wasm──→  my_counter.wasm
+                                        │
+                                        │ copy
+                                        ▼
+[2] Go app (my-dapp/main.go)     artifacts/my_counter.wasm
+        │
+        │ cosmoswasm.NewClient("http://127.0.0.1:50051")
+        │ cosmoswasm.BuildStoreTx(wasmBytes)
+        │ client.SubmitTxBytes(storeTx)
+        │ cosmoswasm.BuildInstantiateTx(...)
+        │ client.SubmitTxBytes(initTx)
+        │ cosmoswasm.BuildExecuteTx(...)
+        │ client.QuerySmart(...)
+        │
+        │ HTTP
+        ▼
+[3] cosmos-exec-grpc (port 50051) ← chạy từ ev-node scripts
+        │
+        ▼
+[4] CosmosExecutor + App (WASM runtime)
+        │
+        ▼
+[5] evcosmos (sequencer + P2P + block production)
+        │
+        │ DA submit
+        ▼
+[6] Celestia light node (port 26658)
+```
+
+---
+
+## Troubleshooting
+
+| Lỗi | Nguyên nhân | Fix |
+|-----|-------------|-----|
+| `DA_BRIDGE_RPC is required` | Chưa set env var | Tạo `.env` hoặc `export DA_BRIDGE_RPC=...` |
+| `executor not reachable` | Chain chưa chạy | Start chain (Phase 4), verify `curl http://127.0.0.1:50051/status` |
+| `store tx failed: code=2` | File .wasm không hợp lệ | Compile lại: `cargo wasm` hoặc dùng optimizer |
+| `instantiate failed` | InitMsg sai format | Đảm bảo JSON matches Rust `InstantiateMsg` struct |
+| `contract_address not found` | Event key khác | Thử cả `_contract_address` và `contract_address` |
+| `timeout waiting for tx` | Block chưa produce | Check `latest_height` tăng chưa, tăng timeout |
+| `cannot detect ev-node project root` | Path sai | Set `EVNODE_PROJECT_ROOT=/path/to/ev-node` |
+| `wasm file too large` | .wasm chưa optimize | Dùng `cosmwasm/rust-optimizer` Docker image |
+
+Chi tiết hơn: [Troubleshooting](troubleshooting.md) | [Error Handling](error-handling.md)
+
+---
+
+## What's next
+
+| Mục tiêu | Guide |
+|----------|-------|
+| Hiểu kiến trúc toàn bộ stack | [Architecture](architecture.md) |
+| Tune timeout, retry, auth | [Configuration](configuration.md) |
+| Deploy production | [Production Guide](production-guide.md) |
+| Xem tất cả API methods | [API Reference](api-reference.md) |
+| Batch submit data lớn | `BatchBuilder` trong [API Reference](api-reference.md) |
+| Chạy examples có sẵn | [examples/](../examples/) — 6 runnable programs |

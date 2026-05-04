@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/merkle"
+	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/merkle"
 )
 
 // MockExecutorClient implements ExecutorClient for unit testing without a

@@ -1,7 +1,7 @@
 package cosmoswasm
 
 import (
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/compress"
+	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/compress"
 )
 
 // CompressGzip compresses data using gzip at the best-speed level.

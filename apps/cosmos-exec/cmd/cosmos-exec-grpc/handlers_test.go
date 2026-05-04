@@ -13,8 +13,8 @@ import (
 	db "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
+	"github.com/evstack/ev-node/apps/cosmos-exec/app"
+	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
 )
 
 func newTestExecutor(t *testing.T) *executor.CosmosExecutor {

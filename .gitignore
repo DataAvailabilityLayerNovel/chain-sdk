@@ -66,3 +66,5 @@ apps/cosmos-exec/quickstart
 
 # Jupyter
 rm.ipynb
+
+apps/cosmos-exec/sdk/cosmoswasm/docs/thesis/

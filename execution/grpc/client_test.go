@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/evstack/ev-node/core/execution"
 )
 
 // mockExecutor is a mock implementation of execution.Executor for testing

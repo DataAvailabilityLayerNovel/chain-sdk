@@ -14,11 +14,16 @@ import (
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
-	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/evstack/ev-node/apps/cosmos-exec/app"
+	"github.com/evstack/ev-node/core/execution"
 )
 
-var _ execution.Executor = (*CosmosExecutor)(nil)
+var (
+	_ execution.Executor       = (*CosmosExecutor)(nil)
+	_ execution.HeightProvider = (*CosmosExecutor)(nil)
+	_ execution.Rollbackable   = (*CosmosExecutor)(nil)
+	_ execution.ExecPruner     = (*CosmosExecutor)(nil)
+)
 
 type CosmosExecutor struct {
 	app *app.App
@@ -602,6 +607,111 @@ func (e *CosmosExecutor) GetPendingTxCount(ctx context.Context) (int, error) {
 	defer e.mu.Unlock()
 
 	return len(e.mempool), nil
+}
+
+// GetLatestHeight returns the current block height of the execution layer.
+// Implements execution.HeightProvider for crash-recovery sync checks.
+func (e *CosmosExecutor) GetLatestHeight(ctx context.Context) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.lastHeight, nil
+}
+
+// Rollback resets the execution layer to the specified target height.
+// This is used for recovery when the executor is ahead of the consensus layer
+// (e.g., executor committed height 10 but ev-node only persisted up to height 8).
+//
+// Implements execution.Rollbackable.
+//
+// It loads the IAVL state at the target version and trims in-memory data
+// (tx results, blocks) above the target height.
+func (e *CosmosExecutor) Rollback(ctx context.Context, targetHeight uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if targetHeight > e.lastHeight {
+		return fmt.Errorf("cannot rollback to future height %d (current: %d)", targetHeight, e.lastHeight)
+	}
+	if targetHeight == e.lastHeight {
+		return nil // already at target
+	}
+
+	// Load the IAVL state at the target version. BaseApp's CommitMultiStore
+	// keeps versioned state in IAVL trees, so we can reload an older version.
+	if err := e.app.LoadVersion(int64(targetHeight)); err != nil {
+		return fmt.Errorf("load version %d: %w", targetHeight, err)
+	}
+
+	// Update state root from the reloaded commit store.
+	cms := e.app.CommitMultiStore()
+	stateRoot := cms.LastCommitID().Hash
+	e.stateRoot = append([]byte(nil), stateRoot...)
+
+	// Trim in-memory data above target height.
+	for h := range e.blocks {
+		if h > targetHeight {
+			delete(e.blocks, h)
+		}
+	}
+	for hash, result := range e.txResults {
+		if result.Height > targetHeight {
+			delete(e.txResults, hash)
+		}
+	}
+
+	// Reset finalized height if it was ahead.
+	if e.finalizedHeight > targetHeight {
+		e.finalizedHeight = targetHeight
+	}
+
+	e.lastHeight = targetHeight
+
+	if err := e.saveMetadataLocked(); err != nil {
+		return fmt.Errorf("persist metadata after rollback: %w", err)
+	}
+
+	return nil
+}
+
+// PruneExec removes execution metadata (tx results, block info) for all heights
+// up to and including the given height. This frees memory for long-running nodes.
+//
+// Implements execution.ExecPruner.
+//
+// Note: blobs are not pruned by height since they are content-addressed and not
+// tied to a specific block height.
+func (e *CosmosExecutor) PruneExec(ctx context.Context, height uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Prune blocks at or below the target height.
+	for h := range e.blocks {
+		if h <= height {
+			delete(e.blocks, h)
+		}
+	}
+
+	// Prune tx results at or below the target height.
+	for hash, result := range e.txResults {
+		if result.Height <= height {
+			delete(e.txResults, hash)
+		}
+	}
+
+	return nil
 }
 
 // Close releases resources held by the executor (e.g. persistence files).
