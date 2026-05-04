@@ -7,7 +7,7 @@ package syncing
 import (
 	"context"
 
-	"github.com/evstack/ev-node/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
 	mock "github.com/stretchr/testify/mock"
 )
 

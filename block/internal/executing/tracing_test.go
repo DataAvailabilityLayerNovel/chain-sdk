@@ -11,9 +11,9 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/telemetry/testutil"
-	"github.com/evstack/ev-node/types"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry/testutil"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // mockBlockProducer provides function hooks for testing the tracing decorator.

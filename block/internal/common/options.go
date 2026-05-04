@@ -3,7 +3,7 @@ package common
 import (
 	"fmt"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // BlockOptions defines the options for creating block components

@@ -1,6 +1,6 @@
 package common
 
-import "github.com/evstack/ev-node/types"
+import "github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 
 // EventSource represents the origin of a block event
 type EventSource string

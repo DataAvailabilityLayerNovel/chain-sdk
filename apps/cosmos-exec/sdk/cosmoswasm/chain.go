@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm/internal/devchain"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm/internal/devchain"
 )
 
 // Default endpoint URLs used by DALChainConfig when no overrides are provided.

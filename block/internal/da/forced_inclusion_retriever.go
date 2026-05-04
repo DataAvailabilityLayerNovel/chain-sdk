@@ -8,9 +8,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // ErrForceInclusionNotConfigured is returned when the forced inclusion namespace is not configured.

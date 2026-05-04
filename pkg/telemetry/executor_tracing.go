@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/evstack/ev-node/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 )
 
 // tracedExecutor wraps a core execution.Executor and records spans for key operations.

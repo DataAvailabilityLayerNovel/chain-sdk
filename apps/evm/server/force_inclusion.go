@@ -14,11 +14,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block"
-	"github.com/evstack/ev-node/pkg/config"
-	da "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	da "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 const (

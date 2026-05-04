@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 func TestPendingBase_ErrorConditions(t *testing.T) {

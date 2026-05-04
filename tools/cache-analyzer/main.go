@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // DataHashForEmptyTxs is the hash of an empty block data.

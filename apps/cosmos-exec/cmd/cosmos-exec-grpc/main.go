@@ -20,11 +20,11 @@ import (
 	db "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/app"
-	"github.com/evstack/ev-node/apps/cosmos-exec/config"
-	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
-	cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
-	execgrpc "github.com/evstack/ev-node/execution/grpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
+	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
+	execgrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc"
 )
 
 func main() {

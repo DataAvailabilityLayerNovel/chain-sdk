@@ -15,7 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"golang.org/x/crypto/argon2"
 
-	"github.com/evstack/ev-node/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
 )
 
 // FileSystemSigner implements a signer that securely stores keys on disk

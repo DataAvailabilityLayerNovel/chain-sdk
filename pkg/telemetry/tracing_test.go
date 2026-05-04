@@ -7,7 +7,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 func TestInitTracing_Disabled(t *testing.T) {

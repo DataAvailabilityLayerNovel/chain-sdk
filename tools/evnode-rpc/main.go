@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	rpcclient "github.com/evstack/ev-node/pkg/rpc/client"
+	rpcclient "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
 )
 
 type output map[string]any

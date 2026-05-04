@@ -29,7 +29,7 @@ import (
 	"github.com/cosmos/ibc-go/v8/modules/apps/transfer"
 	"github.com/stretchr/testify/require"
 
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
 )
 
 var configurePrefixOnce sync.Once

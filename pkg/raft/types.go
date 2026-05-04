@@ -3,7 +3,7 @@ package raft
 import (
 	"fmt"
 
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // RaftBlockState represents a replicated block state

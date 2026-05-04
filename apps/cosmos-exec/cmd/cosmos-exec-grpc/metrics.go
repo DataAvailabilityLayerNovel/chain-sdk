@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
 )
 
 // Metrics tracks request counts and latencies in a lock-free manner.

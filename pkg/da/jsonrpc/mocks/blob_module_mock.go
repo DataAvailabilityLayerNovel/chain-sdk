@@ -8,7 +8,7 @@ import (
 	"context"
 
 	"github.com/celestiaorg/go-square/v3/share"
-	"github.com/evstack/ev-node/pkg/da/jsonrpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
 	mock "github.com/stretchr/testify/mock"
 )
 

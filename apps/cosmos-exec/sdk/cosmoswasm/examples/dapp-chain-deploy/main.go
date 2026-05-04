@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 const defaultWasmURL = "https://github.com/CosmWasm/cw-plus/releases/download/v1.1.0/cw20_base.wasm"

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 // Source is an enum representing different sources of height

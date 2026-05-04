@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/evstack/ev-node/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 // BatchingStrategy defines the interface for different batching strategies

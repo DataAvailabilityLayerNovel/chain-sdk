@@ -3,7 +3,7 @@ package common
 import (
 	"context"
 
-	"github.com/evstack/ev-node/pkg/raft"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/raft"
 )
 
 // RaftNode interface for raft consensus integration

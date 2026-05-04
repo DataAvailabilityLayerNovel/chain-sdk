@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/evstack/ev-node/apps/cosmos-wasm/cmd"
-	evcmd "github.com/evstack/ev-node/pkg/cmd"
-	"github.com/evstack/ev-node/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-wasm/cmd"
+	evcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 func main() {

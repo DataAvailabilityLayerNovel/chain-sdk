@@ -618,7 +618,7 @@ const file_evnode_v1_state_rpc_proto_rawDesc = "" +
 	"\bGetState\x12\x16.google.protobuf.Empty\x1a\x1b.evnode.v1.GetStateResponse\"\x00\x12N\n" +
 	"\vGetMetadata\x12\x1d.evnode.v1.GetMetadataRequest\x1a\x1e.evnode.v1.GetMetadataResponse\"\x00\x12U\n" +
 	"\x12GetGenesisDaHeight\x12\x16.google.protobuf.Empty\x1a%.evnode.v1.GetGenesisDaHeightResponse\"\x00\x12O\n" +
-	"\x0fGetP2PStoreInfo\x12\x16.google.protobuf.Empty\x1a\".evnode.v1.GetP2PStoreInfoResponse\"\x00B/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"\x0fGetP2PStoreInfo\x12\x16.google.protobuf.Empty\x1a\".evnode.v1.GetP2PStoreInfoResponse\"\x00B/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_state_rpc_proto_rawDescOnce sync.Once

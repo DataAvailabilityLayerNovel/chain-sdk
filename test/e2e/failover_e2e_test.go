@@ -30,14 +30,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/execution/evm"
-	evmtest "github.com/evstack/ev-node/execution/evm/test"
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	coreda "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/rpc/client"
-	rpcclient "github.com/evstack/ev-node/pkg/rpc/client"
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
+	evmtest "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm/test"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	coreda "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
+	rpcclient "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // TestLeaseFailoverE2E runs three node binaries configured to use raft consensus.

@@ -12,13 +12,13 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/block/internal/da"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/da"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // DARetriever defines the interface for retrieving events from the DA layer

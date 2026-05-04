@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/evstack/ev-node/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 	mock "github.com/stretchr/testify/mock"
 )
 

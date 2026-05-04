@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // tracedClient decorates a FullClient with OpenTelemetry spans.

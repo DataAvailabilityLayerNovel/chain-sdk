@@ -86,7 +86,7 @@
 //
 // User code should only need:
 //
-//	import cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+//	import cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 //
 // One import, call NewClient or NewClientFromConfig, then use SubmitBlob /
 // CommitRoot / QuerySmart. Internal refactoring (compression algorithm,

@@ -18,10 +18,10 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 type syncType string

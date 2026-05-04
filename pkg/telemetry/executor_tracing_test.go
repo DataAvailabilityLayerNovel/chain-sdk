@@ -13,9 +13,9 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	coreexec "github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/pkg/telemetry/testutil"
-	"github.com/evstack/ev-node/test/mocks"
+	coreexec "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry/testutil"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
 )
 
 // setupTestTracing creates a traced executor with an in-memory span recorder for testing

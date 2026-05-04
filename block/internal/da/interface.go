@@ -3,7 +3,7 @@ package da
 import (
 	"context"
 
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // Client represents the DA client contract.

@@ -16,16 +16,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	genesispkg "github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p"
-	raftpkg "github.com/evstack/ev-node/pkg/raft"
-	"github.com/evstack/ev-node/pkg/service"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	genesispkg "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	raftpkg "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/raft"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/service"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 const (

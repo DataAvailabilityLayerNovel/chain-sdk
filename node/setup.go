@@ -3,9 +3,9 @@ package node
 import (
 	"time"
 
-	"github.com/evstack/ev-node/block"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
 )
 
 const readHeaderTimeout = 10 * time.Second

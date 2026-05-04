@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 var (

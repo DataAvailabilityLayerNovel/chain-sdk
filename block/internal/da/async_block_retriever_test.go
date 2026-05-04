@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	mocks "github.com/evstack/ev-node/test/mocks"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	mocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 func TestAsyncBlockRetriever_GetCachedBlock_NoNamespace(t *testing.T) {

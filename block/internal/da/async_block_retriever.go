@@ -14,9 +14,9 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // AsyncBlockRetriever provides background prefetching of DA blocks

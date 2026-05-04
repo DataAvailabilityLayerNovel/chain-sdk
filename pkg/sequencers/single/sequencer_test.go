@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/block"
-	"github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/test/mocks"
-	"github.com/evstack/ev-node/test/testda"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/testda"
 )
 
 // MockFullDAClient combines MockClient and MockVerifier to implement FullDAClient

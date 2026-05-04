@@ -19,7 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/evstack/ev-node/execution/evm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
 )
 
 // EVMCompatTestSuite tests cross-version compatibility between different ev-node-evm versions.

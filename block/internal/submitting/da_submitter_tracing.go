@@ -8,10 +8,10 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 var _ DASubmitterAPI = (*tracedDASubmitter)(nil)

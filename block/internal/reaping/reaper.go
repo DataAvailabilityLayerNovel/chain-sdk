@@ -11,11 +11,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/executing"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/executing"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
 )
 
 const (

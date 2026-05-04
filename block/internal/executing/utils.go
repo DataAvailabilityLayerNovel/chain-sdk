@@ -1,6 +1,6 @@
 package executing
 
-import coreexecutor "github.com/evstack/ev-node/core/execution"
+import coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 
 // GetCoreExecutor returns the underlying core executor for testing purposes
 func (e *Executor) GetCoreExecutor() coreexecutor.Executor {

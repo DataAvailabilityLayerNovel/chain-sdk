@@ -12,9 +12,9 @@ import (
 	"github.com/rs/zerolog"
 	"gotest.tools/v3/assert"
 
-	"github.com/evstack/ev-node/pkg/config"
-	da "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	da "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
 )
 
 // mockDA implements block/internal/da.Client for testing

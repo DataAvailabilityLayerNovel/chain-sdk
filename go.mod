@@ -1,18 +1,21 @@
-module github.com/evstack/ev-node
+module github.com/DataAvailabilityLayerNovel/chain-sdk
 
 go 1.25.6
 
 retract v0.12.0 // Published by accident
 
+replace github.com/DataAvailabilityLayerNovel/chain-sdk/core => ./core
+
 require (
 	connectrpc.com/connect v1.19.1
 	connectrpc.com/grpcreflect v1.3.0
+	github.com/DataAvailabilityLayerNovel/chain-sdk/core v1.0.0
+	github.com/boltdb/bolt v1.3.1
 	github.com/celestiaorg/go-header v0.8.1
 	github.com/celestiaorg/go-square/merkle v0.0.0-20240627094109-7d01436067a3
 	github.com/celestiaorg/go-square/v3 v3.0.2
 	github.com/celestiaorg/nmt v0.24.2
 	github.com/celestiaorg/utils v0.1.0
-	github.com/evstack/ev-node/core v1.0.0
 	github.com/filecoin-project/go-jsonrpc v0.10.1
 	github.com/go-kit/kit v0.13.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
@@ -47,7 +50,6 @@ require (
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/celestiaorg/go-libp2p-messenger v0.2.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

@@ -6,7 +6,7 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // ErrNotFound is returned when a key is not present in the store.

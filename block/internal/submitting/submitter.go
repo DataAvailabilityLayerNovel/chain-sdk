@@ -12,15 +12,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/common"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // DASubmitterAPI defines minimal methods needed by Submitter for DA submissions.

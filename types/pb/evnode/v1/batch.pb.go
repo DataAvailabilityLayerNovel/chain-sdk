@@ -72,7 +72,7 @@ const file_evnode_v1_batch_proto_rawDesc = "" +
 	"\n" +
 	"\x15evnode/v1/batch.proto\x12\tevnode.v1\"\x19\n" +
 	"\x05Batch\x12\x10\n" +
-	"\x03txs\x18\x01 \x03(\fR\x03txsB/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"\x03txs\x18\x01 \x03(\fR\x03txsB/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_batch_proto_rawDescOnce sync.Once

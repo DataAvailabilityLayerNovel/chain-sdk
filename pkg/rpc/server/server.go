@@ -18,14 +18,14 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/pkg/telemetry"
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
-	rpc "github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
+	rpc "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 var _ rpc.StoreServiceHandler = (*StoreServer)(nil)

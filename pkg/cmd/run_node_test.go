@@ -14,14 +14,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/node"
-	rollconf "github.com/evstack/ev-node/pkg/config"
-	genesis "github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p/key"
-	"github.com/evstack/ev-node/pkg/signer"
-	filesigner "github.com/evstack/ev-node/pkg/signer/file"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/node"
+	rollconf "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	genesis "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p/key"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	filesigner "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer/file"
 )
 
 func createTestComponents(_ context.Context, t *testing.T) (coreexecutor.Executor, coresequencer.Sequencer, signer.Signer, *key.NodeKey, datastore.Batching, func()) {

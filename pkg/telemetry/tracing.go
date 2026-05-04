@@ -13,7 +13,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 
-	"github.com/evstack/ev-node/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 // InitTracing initializes a global OpenTelemetry tracer provider if enabled.

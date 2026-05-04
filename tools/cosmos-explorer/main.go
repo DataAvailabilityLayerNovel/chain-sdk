@@ -21,9 +21,9 @@ import (
 	"time"
 
 	bolt "github.com/boltdb/bolt"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 
-	rpcclient "github.com/evstack/ev-node/pkg/rpc/client"
+	rpcclient "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
 )
 
 const (

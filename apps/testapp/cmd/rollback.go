@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kvexecutor "github.com/evstack/ev-node/apps/testapp/kv"
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
-	"github.com/evstack/ev-node/pkg/store"
+	kvexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/testapp/kv"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 // NewRollbackCmd creates a command to rollback ev-node state by one height.

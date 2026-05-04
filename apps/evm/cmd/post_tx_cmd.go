@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	evblock "github.com/evstack/ev-node/block"
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
-	rollconf "github.com/evstack/ev-node/pkg/config"
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	da "github.com/evstack/ev-node/pkg/da/types"
-	genesispkg "github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
+	evblock "github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	rollconf "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	da "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	genesispkg "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 const (

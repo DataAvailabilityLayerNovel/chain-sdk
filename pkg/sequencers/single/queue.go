@@ -13,9 +13,9 @@ import (
 	"github.com/ipfs/go-datastore/query"
 	"google.golang.org/protobuf/proto"
 
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/store"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // ErrQueueFull is returned when the batch queue has reached its maximum size

@@ -15,9 +15,9 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/evstack/ev-node/pkg/telemetry/testutil"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
-	"github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry/testutil"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 // mock implementations for StoreService

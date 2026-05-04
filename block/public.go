@@ -5,10 +5,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/block/internal/da"
-	"github.com/evstack/ev-node/pkg/config"
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/da"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
 )
 
 // BlockOptions defines the options for creating block components

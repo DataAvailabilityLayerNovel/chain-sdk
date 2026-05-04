@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/evstack/ev-node/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
 )
 
 var _ DARetriever = (*tracedDARetriever)(nil)

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	cmds "github.com/evstack/ev-node/apps/testapp/cmd"
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
+	cmds "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/testapp/cmd"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
 )
 
 func main() {

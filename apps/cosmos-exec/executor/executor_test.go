@@ -16,8 +16,8 @@ import (
 
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-	"github.com/evstack/ev-node/apps/cosmos-exec/app"
-	"github.com/evstack/ev-node/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
 )
 
 func TestCosmosExecutorLifecycle(t *testing.T) {

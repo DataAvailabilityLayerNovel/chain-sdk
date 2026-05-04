@@ -253,7 +253,7 @@ const file_evnode_v1_p2p_rpc_proto_rawDesc = "" +
 	"P2PService\x12G\n" +
 	"\vGetPeerInfo\x12\x16.google.protobuf.Empty\x1a\x1e.evnode.v1.GetPeerInfoResponse\"\x00\x12E\n" +
 	"\n" +
-	"GetNetInfo\x12\x16.google.protobuf.Empty\x1a\x1d.evnode.v1.GetNetInfoResponse\"\x00B/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"GetNetInfo\x12\x16.google.protobuf.Empty\x1a\x1d.evnode.v1.GetNetInfoResponse\"\x00B/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_p2p_rpc_proto_rawDescOnce sync.Once

@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/pkg/config"
-	pkgstore "github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	pkgstore "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // helper to make a temp config rooted at t.TempDir()

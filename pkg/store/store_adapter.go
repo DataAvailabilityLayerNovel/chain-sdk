@@ -11,8 +11,8 @@ import (
 
 	"github.com/celestiaorg/go-header"
 
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // errElapsedHeight is returned when the requested height was already stored.

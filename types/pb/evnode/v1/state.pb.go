@@ -295,7 +295,7 @@ const file_evnode_v1_state_proto_rawDesc = "" +
 	"\x04data\x18\a \x01(\fR\x04data\"O\n" +
 	"\x15SequencerDACheckpoint\x12\x1b\n" +
 	"\tda_height\x18\x01 \x01(\x04R\bdaHeight\x12\x19\n" +
-	"\btx_index\x18\x02 \x01(\x04R\atxIndexB/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"\btx_index\x18\x02 \x01(\x04R\atxIndexB/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_state_proto_rawDescOnce sync.Once

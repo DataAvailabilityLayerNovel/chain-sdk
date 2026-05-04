@@ -5,7 +5,7 @@ package benchmark
 import (
 	"time"
 
-	e2e "github.com/evstack/ev-node/test/e2e"
+	e2e "github.com/DataAvailabilityLayerNovel/chain-sdk/test/e2e"
 )
 
 // jaegerSpan holds the fields we extract from Jaeger's untyped JSON response.

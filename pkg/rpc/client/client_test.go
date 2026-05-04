@@ -16,13 +16,13 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/rpc/server"
-	"github.com/evstack/ev-node/test/mocks"
-	headerstoremocks "github.com/evstack/ev-node/test/mocks/external"
-	"github.com/evstack/ev-node/types"
-	rpc "github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/server"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	headerstoremocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks/external"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	rpc "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 func setupTestServer(

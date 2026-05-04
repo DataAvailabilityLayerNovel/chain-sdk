@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func TestDARetriever_StrictEnvelopeMode_Switch(t *testing.T) {

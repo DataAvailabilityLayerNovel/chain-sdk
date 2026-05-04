@@ -16,15 +16,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/signer/noop"
-	"github.com/evstack/ev-node/pkg/store"
-	testmocks "github.com/evstack/ev-node/test/mocks"
-	extmocks "github.com/evstack/ev-node/test/mocks/external"
-	"github.com/evstack/ev-node/types"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer/noop"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	testmocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	extmocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks/external"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // noopDAHintAppender is a no-op implementation of DAHintAppender for testing

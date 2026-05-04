@@ -6,7 +6,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 
-	"github.com/evstack/ev-node/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
 )
 
 // NoopSigner implements the remote_signer.Signer interface.

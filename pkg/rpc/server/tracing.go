@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
-	"github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 // tracedStoreServer decorates a StoreServiceHandler with OpenTelemetry spans.

@@ -11,9 +11,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/block/internal/da"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/da"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // DAFollower subscribes to DA blob events and drives sequential catchup.

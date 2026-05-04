@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zaptest"
 
-	e2e "github.com/evstack/ev-node/test/e2e"
+	e2e "github.com/DataAvailabilityLayerNovel/chain-sdk/test/e2e"
 )
 
 // SpamoorSuite groups benchmarks that use Spamoor for load generation

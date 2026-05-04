@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	testmocks "github.com/evstack/ev-node/test/mocks"
-	"github.com/evstack/ev-node/types"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	testmocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func TestBasicExecutionFlow(t *testing.T) {

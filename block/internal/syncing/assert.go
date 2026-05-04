@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func assertExpectedProposer(genesis genesis.Genesis, proposerAddr []byte) error {

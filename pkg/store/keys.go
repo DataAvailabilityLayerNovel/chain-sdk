@@ -3,7 +3,7 @@ package store
 import (
 	"strconv"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 const (

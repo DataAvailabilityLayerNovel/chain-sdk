@@ -8,8 +8,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	storepkg "github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	storepkg "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func TestPendingHeaders_BasicFlow(t *testing.T) {

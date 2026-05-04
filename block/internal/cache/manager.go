@@ -9,10 +9,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // isNotFound is a convenience alias for store.IsNotFound.

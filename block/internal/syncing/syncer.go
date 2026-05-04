@@ -16,15 +16,15 @@ import (
 	"github.com/celestiaorg/go-header"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/block/internal/da"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/raft"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/da"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/raft"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 var _ BlockSyncer = (*Syncer)(nil)

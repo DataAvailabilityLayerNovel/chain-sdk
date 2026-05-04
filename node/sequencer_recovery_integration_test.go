@@ -16,14 +16,14 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	evconfig "github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p/key"
-	signer "github.com/evstack/ev-node/pkg/signer/noop"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	evconfig "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p/key"
+	signer "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer/noop"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // TestSequencerRecoveryFromDA verifies that a new sequencer node can recover from DA.

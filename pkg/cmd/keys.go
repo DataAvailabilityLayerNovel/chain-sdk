@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	rollconf "github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/signer/file"
+	rollconf "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer/file"
 )
 
 // KeysCmd returns a command for managing keys.

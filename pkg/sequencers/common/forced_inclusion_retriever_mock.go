@@ -7,7 +7,7 @@ package common
 import (
 	"context"
 
-	"github.com/evstack/ev-node/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
 	mock "github.com/stretchr/testify/mock"
 )
 

@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	config "github.com/evstack/ev-node/pkg/config"
+	config "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 const (

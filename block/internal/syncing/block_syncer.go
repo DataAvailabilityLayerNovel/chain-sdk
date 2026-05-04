@@ -3,8 +3,8 @@ package syncing
 import (
 	"context"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // BlockSyncer defines operations for block synchronization that can be traced.

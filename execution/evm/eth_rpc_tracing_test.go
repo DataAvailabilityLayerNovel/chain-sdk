@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/evstack/ev-node/pkg/telemetry/testutil"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry/testutil"
 )
 
 // setupTestEthRPCTracing creates a traced eth RPC client with an in-memory span recorder

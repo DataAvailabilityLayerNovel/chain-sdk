@@ -19,13 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/test/mocks"
-	headerstoremocks "github.com/evstack/ev-node/test/mocks/external"
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	headerstoremocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks/external"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 func mustGETRequest(t *testing.T, url string) *http.Request {

@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/evstack/ev-node/execution/evm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
 )
 
 const (

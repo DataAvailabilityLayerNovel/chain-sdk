@@ -8,7 +8,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // DefaultBatch provides a batched write interface for atomic store operations

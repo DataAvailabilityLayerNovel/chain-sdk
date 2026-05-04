@@ -5,7 +5,7 @@
 package mocks
 
 import (
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 	"github.com/ipfs/go-datastore"
 	mock "github.com/stretchr/testify/mock"
 )

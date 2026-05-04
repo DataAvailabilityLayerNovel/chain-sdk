@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/evstack/ev-node/apps/evm/cmd"
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
-	"github.com/evstack/ev-node/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/evm/cmd"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 func main() {

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	pkgstore "github.com/evstack/ev-node/pkg/store"
+	pkgstore "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 type testItem struct{ V int }

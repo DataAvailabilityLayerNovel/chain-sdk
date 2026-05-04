@@ -11,8 +11,8 @@ import (
 	fjrpc "github.com/filecoin-project/go-jsonrpc"
 	"github.com/rs/zerolog"
 
-	jsonrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	jsonrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // blobServer exposes a minimal Celestia-like blob RPC surface backed by LocalDA.

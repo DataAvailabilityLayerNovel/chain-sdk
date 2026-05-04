@@ -11,17 +11,17 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/evstack/ev-node/block"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	genesispkg "github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/raft"
-	rpcserver "github.com/evstack/ev-node/pkg/rpc/server"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/pkg/store"
-	evsync "github.com/evstack/ev-node/pkg/sync"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	genesispkg "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/raft"
+	rpcserver "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/server"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	evsync "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/sync"
 )
 
 // failoverState collect the components to reset when switching modes.

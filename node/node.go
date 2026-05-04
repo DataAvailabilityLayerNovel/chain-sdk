@@ -4,14 +4,14 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/service"
-	"github.com/evstack/ev-node/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/service"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
 )
 
 // Node is the interface for an application node

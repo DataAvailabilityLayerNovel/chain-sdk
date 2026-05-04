@@ -11,9 +11,9 @@ import (
 	"github.com/celestiaorg/go-square/v3/share"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // Config contains configuration for the blob DA client.

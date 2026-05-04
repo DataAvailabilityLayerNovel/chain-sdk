@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	e2e "github.com/evstack/ev-node/test/e2e"
+	e2e "github.com/DataAvailabilityLayerNovel/chain-sdk/test/e2e"
 )
 
 // entry matches the customSmallerIsBetter format for github-action-benchmark.

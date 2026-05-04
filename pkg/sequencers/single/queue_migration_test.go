@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 func TestLoad_MigratesLegacyKeys(t *testing.T) {

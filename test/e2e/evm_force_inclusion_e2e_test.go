@@ -21,11 +21,11 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/block"
-	"github.com/evstack/ev-node/execution/evm"
-	"github.com/evstack/ev-node/pkg/config"
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	da "github.com/evstack/ev-node/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	da "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // enableForceInclusionInGenesis modifies the genesis file to set the force inclusion epoch

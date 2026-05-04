@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	nodeclient "github.com/evstack/ev-node/pkg/rpc/client"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	nodeclient "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 var binaryPath string

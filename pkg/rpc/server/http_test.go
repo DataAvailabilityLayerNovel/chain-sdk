@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/test/mocks"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func TestRegisterCustomHTTPEndpoints(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	badger4 "github.com/ipfs/go-ds-badger4"
 
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 type config struct {

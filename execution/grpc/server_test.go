@@ -9,7 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 func TestServer_InitChain(t *testing.T) {

@@ -7,7 +7,7 @@ package mocks
 import (
 	"context"
 
-	"github.com/evstack/ev-node/pkg/da/jsonrpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
 	mock "github.com/stretchr/testify/mock"
 )
 

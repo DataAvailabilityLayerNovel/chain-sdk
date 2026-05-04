@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
 )
 
 var _ coresequencer.Sequencer = (*tracedSequencer)(nil)

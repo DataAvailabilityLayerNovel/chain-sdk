@@ -24,8 +24,8 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/config"
-	rollhash "github.com/evstack/ev-node/pkg/hash"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	rollhash "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/hash"
 )
 
 // TODO(tzdybal): refactor to configuration parameters

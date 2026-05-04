@@ -32,8 +32,8 @@ import (
 	"github.com/cosmos/ibc-go/v8/modules/apps/transfer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 // TestEvNode_PostsToDA spins up celestia-app, a celestia bridge node and an

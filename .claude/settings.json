@@ -27,7 +27,15 @@
       "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/executor/*.go)",
       "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/app/*.go)",
       "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-wasm/cmd/*.go)",
-      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/docs/thesis*)"
+      "Bash(ls /Users/nguyennganha/code/ev-node/apps/cosmos-exec/sdk/cosmoswasm/docs/thesis*)",
+      "Bash(find apps/cosmos-exec -name '*.go' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)",
+      "Bash(find apps/cosmos-wasm -name '*.go' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)",
+      "Bash(find execution/grpc -name '*.go' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)",
+      "Bash(find types/pb -name '*.go' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)",
+      "Bash(find apps/cosmos-wasm -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
+      "Bash(find execution/grpc -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
+      "Bash(find types/pb -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
+      "Bash(find . -name '*.go' -not -path './vendor/*' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)"
     ]
   }
 }

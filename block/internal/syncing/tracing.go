@@ -9,8 +9,8 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 var _ BlockSyncer = (*tracedBlockSyncer)(nil)

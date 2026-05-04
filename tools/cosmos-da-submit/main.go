@@ -20,8 +20,8 @@ import (
 
 	libshare "github.com/celestiaorg/go-square/v3/share"
 
-	dajsonrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	dajsonrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 type submitPayload struct {

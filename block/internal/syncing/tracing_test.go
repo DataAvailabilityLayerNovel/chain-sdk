@@ -11,9 +11,9 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/pkg/telemetry/testutil"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry/testutil"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // mockBlockSyncer provides function hooks for testing the tracing decorator.

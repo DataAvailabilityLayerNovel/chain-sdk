@@ -29,7 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/execution/evm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
 )
 
 // TestEvmDARestartWithPendingBlocksE2E tests the scenario where DA layer is killed

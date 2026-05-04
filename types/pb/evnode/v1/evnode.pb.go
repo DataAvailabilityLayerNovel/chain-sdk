@@ -846,7 +846,7 @@ const file_evnode_v1_evnode_proto_rawDesc = "" +
 	"\bmetadata\x18\x01 \x01(\v2\x13.evnode.v1.MetadataR\bmetadata\x12\x10\n" +
 	"\x03txs\x18\x02 \x03(\fR\x03txs\x12)\n" +
 	"\x0eda_height_hint\x18\x03 \x01(\x04H\x00R\fdaHeightHint\x88\x01\x01B\x11\n" +
-	"\x0f_da_height_hintB/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"\x0f_da_height_hintB/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_evnode_proto_rawDescOnce sync.Once

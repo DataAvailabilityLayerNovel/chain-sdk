@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	"github.com/evstack/ev-node/pkg/da/jsonrpc/mocks"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc/mocks"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 func makeBlobRPCClient(blobModule *mocks.MockBlobModule, headerModule *mocks.MockHeaderModule) *blobrpc.Client {

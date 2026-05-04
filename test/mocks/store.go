@@ -7,8 +7,8 @@ package mocks
 import (
 	"context"
 
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 	mock "github.com/stretchr/testify/mock"
 )
 

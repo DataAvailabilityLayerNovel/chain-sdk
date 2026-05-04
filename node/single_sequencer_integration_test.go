@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	evconfig "github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/test/testda"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	evconfig "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/testda"
 )
 
 // FullNodeTestSuite is a test suite for full node integration tests

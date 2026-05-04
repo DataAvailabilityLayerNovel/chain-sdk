@@ -6,7 +6,7 @@ import (
 	"github.com/celestiaorg/go-header"
 	"google.golang.org/protobuf/proto"
 
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 var (

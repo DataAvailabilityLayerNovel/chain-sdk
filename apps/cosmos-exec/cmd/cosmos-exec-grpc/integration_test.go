@@ -18,8 +18,8 @@ import (
 	txv1beta1 "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/cosmos/gogoproto/proto"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/app"
-	"github.com/evstack/ev-node/apps/cosmos-exec/executor"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
 )
 
 // TestIntegration_SubmitExecuteQuery tests the full lifecycle:

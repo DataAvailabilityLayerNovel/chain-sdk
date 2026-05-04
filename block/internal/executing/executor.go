@@ -14,16 +14,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/common"
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/raft"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/raft"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 var _ BlockProducer = (*Executor)(nil)
@@ -292,7 +292,7 @@ func (e *Executor) initializeState() error {
 
 	// Migrate any old-style pending block (stored at height N+1 via SaveBlockData
 	// with empty signature) to the new metadata-key format.
-	// Todo remove in the future: https://github.com/evstack/ev-node/issues/2795
+	// Todo remove in the future: https://github.com/DataAvailabilityLayerNovel/chain-sdk/issues/2795
 	if err := e.migrateLegacyPendingBlock(e.ctx); err != nil {
 		return fmt.Errorf("failed to migrate legacy pending block: %w", err)
 	}

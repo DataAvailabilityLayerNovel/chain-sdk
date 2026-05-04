@@ -18,8 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/p2p/key"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p/key"
 )
 
 type testNet []*Client

@@ -6,7 +6,7 @@ import (
 	"github.com/celestiaorg/go-header"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 type (

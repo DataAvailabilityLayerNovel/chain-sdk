@@ -35,8 +35,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/execution/evm"
-	evmtest "github.com/evstack/ev-node/execution/evm/test"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
+	evmtest "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm/test"
 )
 
 // evmSingleBinaryPath is the path to the evm-single binary used in tests

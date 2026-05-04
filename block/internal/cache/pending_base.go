@@ -12,7 +12,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 // DefaultPendingCacheSize is the default size for the pending items cache.

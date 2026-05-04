@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/p2p"
-	"github.com/evstack/ev-node/pkg/rpc/server"
-	testmocks "github.com/evstack/ev-node/test/mocks"
-	"github.com/evstack/ev-node/types/pb/evnode/v1/v1connect"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/server"
+	testmocks "github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1/v1connect"
 )
 
 type contextKey string

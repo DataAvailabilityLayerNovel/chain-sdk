@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/config"
-	coreda "github.com/evstack/ev-node/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	coreda "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 type stubDAVizClient struct{}

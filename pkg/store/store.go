@@ -10,8 +10,8 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/evstack/ev-node/types"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // DefaultStore is a default store implementation.

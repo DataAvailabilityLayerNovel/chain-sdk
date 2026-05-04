@@ -13,16 +13,16 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block/internal/cache"
-	"github.com/evstack/ev-node/block/internal/common"
-	"github.com/evstack/ev-node/block/internal/da"
-	"github.com/evstack/ev-node/pkg/config"
-	pkgda "github.com/evstack/ev-node/pkg/da"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/rpc/server"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/cache"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block/internal/da"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	pkgda "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/server"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 const (

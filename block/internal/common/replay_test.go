@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/test/mocks"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/test/mocks"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 func TestReplayer_SyncToHeight_ExecutorBehind(t *testing.T) {

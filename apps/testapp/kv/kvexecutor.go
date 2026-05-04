@@ -11,8 +11,8 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 
-	"github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 var (

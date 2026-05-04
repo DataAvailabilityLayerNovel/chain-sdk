@@ -11,9 +11,9 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	coreexecutor "github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/store"
+	coreexecutor "github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 // Pruner periodically removes old state and execution metadata entries.

@@ -23,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/evstack/ev-node/pkg/p2p/key"
-	"github.com/evstack/ev-node/pkg/rpc/client"
-	pb "github.com/evstack/ev-node/types/pb/evnode/v1"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p/key"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/client"
+	pb "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1"
 )
 
 // WorkDir defines the default working directory for spawned processes.

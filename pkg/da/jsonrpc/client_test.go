@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	"github.com/evstack/ev-node/pkg/da/jsonrpc/mocks"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc/mocks"
 )
 
 func newTestServer(t *testing.T, module any) *httptest.Server {

@@ -132,7 +132,7 @@ const file_evnode_v1_config_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\fR\aaddress2\xa7\x01\n" +
 	"\rConfigService\x12I\n" +
 	"\fGetNamespace\x12\x16.google.protobuf.Empty\x1a\x1f.evnode.v1.GetNamespaceResponse\"\x00\x12K\n" +
-	"\rGetSignerInfo\x12\x16.google.protobuf.Empty\x1a .evnode.v1.GetSignerInfoResponse\"\x00B/Z-github.com/evstack/ev-node/types/pb/evnode/v1b\x06proto3"
+	"\rGetSignerInfo\x12\x16.google.protobuf.Empty\x1a .evnode.v1.GetSignerInfoResponse\"\x00B/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_config_proto_rawDescOnce sync.Once

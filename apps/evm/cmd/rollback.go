@@ -11,9 +11,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/evstack/ev-node/execution/evm"
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 // NewRollbackCmd creates a command to rollback ev-node state by one height.

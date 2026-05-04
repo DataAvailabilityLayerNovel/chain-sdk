@@ -8,9 +8,9 @@ import (
 	"github.com/celestiaorg/go-header"
 	"github.com/libp2p/go-libp2p/core/crypto"
 
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/signer"
-	"github.com/evstack/ev-node/pkg/signer/noop"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/signer/noop"
 )
 
 // DefaultSigningKeyType is the key type used by the sequencer signing key
@@ -300,7 +300,7 @@ func getBlockDataWith(nTxs int) *Data {
 		data.Txs[i] = GetRandomTx()
 	}
 
-	// TODO(tzdybal): see https://github.com/evstack/ev-node/issues/143
+	// TODO(tzdybal): see https://github.com/DataAvailabilityLayerNovel/chain-sdk/issues/143
 	if nTxs == 0 {
 		data.Txs = nil
 	}

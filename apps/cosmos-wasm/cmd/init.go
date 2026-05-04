@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	rollcmd "github.com/evstack/ev-node/pkg/cmd"
-	rollconf "github.com/evstack/ev-node/pkg/config"
-	rollgenesis "github.com/evstack/ev-node/pkg/genesis"
+	rollcmd "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/cmd"
+	rollconf "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	rollgenesis "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
 )
 
 func InitCmd() *cobra.Command {

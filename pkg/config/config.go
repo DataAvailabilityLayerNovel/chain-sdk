@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 const (

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	evconfig "github.com/evstack/ev-node/pkg/config"
+	evconfig "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
 )
 
 // TestTxGossipingMultipleNodesNoDA tests that transactions are gossiped and blocks are sequenced and synced across multiple nodes without the DA layer over P2P.

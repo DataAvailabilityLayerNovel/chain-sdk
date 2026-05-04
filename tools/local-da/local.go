@@ -16,8 +16,8 @@ import (
 	libshare "github.com/celestiaorg/go-square/v3/share"
 	"github.com/rs/zerolog"
 
-	blobrpc "github.com/evstack/ev-node/pkg/da/jsonrpc"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
+	blobrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/jsonrpc"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
 )
 
 const (

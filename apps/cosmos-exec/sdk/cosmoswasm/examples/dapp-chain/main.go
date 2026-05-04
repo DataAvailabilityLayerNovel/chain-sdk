@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 func main() {

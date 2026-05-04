@@ -10,14 +10,14 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/block"
-	"github.com/evstack/ev-node/core/execution"
-	coresequencer "github.com/evstack/ev-node/core/sequencer"
-	"github.com/evstack/ev-node/pkg/config"
-	datypes "github.com/evstack/ev-node/pkg/da/types"
-	"github.com/evstack/ev-node/pkg/genesis"
-	seqcommon "github.com/evstack/ev-node/pkg/sequencers/common"
-	"github.com/evstack/ev-node/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/block"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	coresequencer "github.com/DataAvailabilityLayerNovel/chain-sdk/core/sequencer"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	datypes "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/da/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	seqcommon "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/sequencers/common"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
 )
 
 var _ coresequencer.Sequencer = (*BasedSequencer)(nil)

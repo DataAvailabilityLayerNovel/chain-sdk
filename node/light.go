@@ -10,13 +10,13 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/config"
-	"github.com/evstack/ev-node/pkg/genesis"
-	"github.com/evstack/ev-node/pkg/p2p"
-	rpcserver "github.com/evstack/ev-node/pkg/rpc/server"
-	"github.com/evstack/ev-node/pkg/service"
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/pkg/sync"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/config"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/genesis"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/p2p"
+	rpcserver "github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/rpc/server"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/service"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/sync"
 )
 
 var _ Node = &LightNode{}

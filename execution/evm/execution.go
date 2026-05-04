@@ -23,8 +23,8 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/core/execution"
-	"github.com/evstack/ev-node/pkg/telemetry"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/telemetry"
 )
 
 const (

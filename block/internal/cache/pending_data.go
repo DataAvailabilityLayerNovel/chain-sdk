@@ -7,8 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/evstack/ev-node/pkg/store"
-	"github.com/evstack/ev-node/types"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/pkg/store"
+	"github.com/DataAvailabilityLayerNovel/chain-sdk/types"
 )
 
 // LastSubmittedDataHeightKey is the key used for persisting the last submitted data height in store.

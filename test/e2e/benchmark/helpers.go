@@ -13,7 +13,7 @@ import (
 
 	"github.com/celestiaorg/tastora/framework/docker/evstack/spamoor"
 	"github.com/ethereum/go-ethereum/ethclient"
-	e2e "github.com/evstack/ev-node/test/e2e"
+	e2e "github.com/DataAvailabilityLayerNovel/chain-sdk/test/e2e"
 )
 
 // blockMetrics holds aggregated gas and transaction data across a range of blocks.
