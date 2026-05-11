@@ -6,31 +6,25 @@ import (
 	"testing"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
-
+	"cosmossdk.io/log"
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
+	dbm "github.com/cosmos/cosmos-db"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func TestReflectContractLifecycle(t *testing.T) {
-	application := New(log.NewNopLogger(), db.NewMemDB())
+	application := New(log.NewNopLogger(), dbm.NewMemDB())
 	application.InitChainWithDefaultGenesis("")
 
-	ctx := application.BaseApp.NewContext(false, tmproto.Header{
-		Height:  1,
-		Time:    time.Now(),
-		ChainID: "",
-	})
+	ctx := application.BaseApp.NewContext(false).WithBlockHeight(1).WithBlockTime(time.Now())
 
 	msgServer := wasmkeeper.NewMsgServerImpl(&application.WasmKeeper)
 	sender := sdk.AccAddress(bytes.Repeat([]byte{0x11}, 20))
 	newOwner := sdk.AccAddress(bytes.Repeat([]byte{0x22}, 20))
 
-	storeResp, err := msgServer.StoreCode(sdk.WrapSDKContext(ctx), &wasmtypes.MsgStoreCode{
+	storeResp, err := msgServer.StoreCode(ctx, &wasmtypes.MsgStoreCode{
 		Sender:       sender.String(),
 		WASMByteCode: testdata.ReflectContractWasm(),
 	})
@@ -41,7 +35,7 @@ func TestReflectContractLifecycle(t *testing.T) {
 		t.Fatal("store code returned empty code id")
 	}
 
-	instantiateResp, err := msgServer.InstantiateContract(sdk.WrapSDKContext(ctx), &wasmtypes.MsgInstantiateContract{
+	instantiateResp, err := msgServer.InstantiateContract(ctx, &wasmtypes.MsgInstantiateContract{
 		Sender: sender.String(),
 		CodeID: storeResp.CodeID,
 		Label:  "reflect-lifecycle",
@@ -85,7 +79,7 @@ func TestReflectContractLifecycle(t *testing.T) {
 		t.Fatalf("marshal execute message failed: %v", err)
 	}
 
-	if _, err := msgServer.ExecuteContract(sdk.WrapSDKContext(ctx), &wasmtypes.MsgExecuteContract{
+	if _, err := msgServer.ExecuteContract(ctx, &wasmtypes.MsgExecuteContract{
 		Sender:   sender.String(),
 		Contract: instantiateResp.Address,
 		Msg:      execMsg,

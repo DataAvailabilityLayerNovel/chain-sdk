@@ -35,7 +35,28 @@
       "Bash(find apps/cosmos-wasm -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
       "Bash(find execution/grpc -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
       "Bash(find types/pb -name '*.go' -exec sed -i '' 's|github.com/DataAvailabilityLayerNovel/chain-sdk|github.com/evstack/ev-node|g' {} +)",
-      "Bash(find . -name '*.go' -not -path './vendor/*' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)"
+      "Bash(find . -name '*.go' -not -path './vendor/*' -exec sed -i '' 's|github.com/evstack/ev-node|github.com/DataAvailabilityLayerNovel/chain-sdk|g' {} +)",
+      "Bash(chmod +x /Users/nguyennganha/code/ev-node/scripts/query_celestia_proof.sh /Users/nguyennganha/code/ev-node/scripts/query_celestia_status.sh)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node diff block/internal/syncing/da_follower.go)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node log --oneline -20)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node diff block/internal/syncing/syncer.go)",
+      "Read(//Users/nguyennganha/go/pkg/mod/google.golang.org/protobuf@v1.36.11/internal/filedesc/**)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node log --oneline -5 -- types/pb/evnode/v1/batch.pb.go)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node show --stat 55a774bf)",
+      "Bash(git -C /Users/nguyennganha/code/ev-node show 55a774bf -- types/pb/evnode/v1/batch.pb.go)",
+      "Bash(command -v buf)",
+      "Bash(buf --version)",
+      "Bash(go build *)",
+      "Bash(grep -rn \"SAVE TREE\\\\|BATCH SAVE\\\\|saveTree\\\\|batchSave\" /Users/nguyennganha/go/pkg/mod/cosmossdk.io 2>/dev/null | head -10; echo \"---\"; grep -rn \"SAVE TREE\" /Users/nguyennganha/go/pkg/mod/github.com/cosmos 2>/dev/null | head -5)",
+      "Read(//Users/nguyennganha/go/pkg/mod/cosmossdk.io/**)",
+      "Read(//Users/nguyennganha/go/pkg/mod/github.com/cosmos/**)",
+      "Bash(find /Users/nguyennganha/go/pkg/mod/github.com/celestiaorg/celestia-openrpc* -name \"*.go\" 2>/dev/null | xargs grep -l \"NetworkHead\\\\|LocalHead\\\\|SyncState\" 2>/dev/null | head -5)",
+      "Read(//Users/nguyennganha/go/pkg/mod/github.com/celestiaorg/**)",
+      "Bash(find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia-openrpc*\" 2>/dev/null | head -5; find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia*\" 2>/dev/null | head -10)",
+      "Read(//Users/nguyennganha/go/pkg/mod/**)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

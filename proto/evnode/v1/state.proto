@@ -4,7 +4,7 @@ package evnode.v1;
 import "evnode/v1/evnode.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/evstack/ev-node/types/pb/evnode/v1";
+option go_package = "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1";
 
 // State is the state of the blockchain.
 message State {

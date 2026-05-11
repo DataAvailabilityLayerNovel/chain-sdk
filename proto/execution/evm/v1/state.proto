@@ -4,7 +4,7 @@ package execution.evm.v1;
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/evstack/ev-node/execution/evm/types/pb/execution/evm/v1";
+option go_package = "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/evm/types/pb/execution/evm/v1";
 
 // ExecMeta tracks execution state per height for idempotent execution.
 // This enables crash recovery and prevents sibling block creation on retries.

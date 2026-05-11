@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
+	"cosmossdk.io/log"
+	dbm "github.com/cosmos/cosmos-db"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 	"github.com/CosmWasm/wasmd/x/wasm/keeper/testdata"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -30,7 +30,7 @@ import (
 // 5. Verify block is recorded
 func TestIntegration_SubmitExecuteQuery(t *testing.T) {
 	ctx := context.Background()
-	exec := executor.New(app.New(log.NewNopLogger(), db.NewMemDB()))
+	exec := executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
 
 	sender := sdk.AccAddress(bytes.Repeat([]byte{0x11}, 20))
 

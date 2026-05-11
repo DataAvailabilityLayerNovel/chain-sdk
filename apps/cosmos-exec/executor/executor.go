@@ -10,9 +10,9 @@ import (
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	storetypes "cosmossdk.io/store/types"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/core/execution"
@@ -288,17 +288,23 @@ func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, i
 	// Set it before calling InitChain so the validation passes.
 	baseapp.SetChainID(chainID)(e.app.BaseApp)
 
-	resp := e.app.InitChain(abci.RequestInitChain{
+	resp, err := e.app.InitChain(&abci.RequestInitChain{
 		Time:          genesisTime,
 		ChainId:       chainID,
 		InitialHeight: int64(initialHeight),
 		AppStateBytes: e.app.DefaultGenesis(),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("init chain: %w", err)
+	}
 
 	stateRoot := append([]byte(nil), resp.AppHash...)
 	if len(stateRoot) == 0 {
-		commitResp := e.app.Commit()
-		stateRoot = append([]byte(nil), commitResp.Data...)
+		_, commitErr := e.app.Commit()
+		if commitErr != nil {
+			return nil, fmt.Errorf("commit after init chain: %w", commitErr)
+		}
+		stateRoot = append([]byte(nil), e.app.CommitMultiStore().LastCommitID().Hash...)
 	}
 
 	e.initialized = true
@@ -353,46 +359,58 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 		return nil, fmt.Errorf("unexpected block height %d (expected %d)", blockHeight, e.lastHeight+1)
 	}
 
-	e.app.BeginBlock(abci.RequestBeginBlock{
-		Header: tmproto.Header{
-			Height:  int64(blockHeight),
-			Time:    timestamp,
-			ChainID: e.chainID,
-		},
-	})
-
+	// Filter out empty txs for FinalizeBlock
+	var validTxs [][]byte
 	for _, tx := range txs {
-		if len(tx) == 0 {
-			continue
+		if len(tx) > 0 {
+			validTxs = append(validTxs, tx)
 		}
-		txHash := hashTx(tx)
-		deliverResp := e.app.DeliverTx(abci.RequestDeliverTx{Tx: tx})
+	}
 
-		txResult := TxExecutionResult{
+	finalizeResp, err := e.app.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Txs:    validTxs,
+		Height: int64(blockHeight),
+		Time:   timestamp,
+		Hash:   prevStateRoot,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finalize block: %w", err)
+	}
+
+	// Process tx results from FinalizeBlock response
+	for i, txResult := range finalizeResp.TxResults {
+		if i >= len(validTxs) {
+			break
+		}
+		txHash := hashTx(validTxs[i])
+		result := TxExecutionResult{
 			Hash:   txHash,
 			Height: blockHeight,
-			Code:   deliverResp.Code,
-			Log:    deliverResp.Log,
-			Events: toEvents(deliverResp.Events),
+			Code:   txResult.Code,
+			Log:    txResult.Log,
+			Events: toExecTxEvents(txResult.Events),
 		}
-		e.txResults[txHash] = txResult
+		e.txResults[txHash] = result
 		if e.persistStore != nil {
-			if persistErr := e.persistStore.AppendTxResult(txResult); persistErr != nil {
+			if persistErr := e.persistStore.AppendTxResult(result); persistErr != nil {
 				return nil, fmt.Errorf("persist tx result: %w", persistErr)
 			}
 		}
 	}
 
-	e.app.EndBlock(abci.RequestEndBlock{Height: int64(blockHeight)})
-	commitResp := e.app.Commit()
+	_, err = e.app.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
 
-	e.stateRoot = append([]byte(nil), commitResp.Data...)
+	// In SDK v0.50, app hash is obtained from the commit multi store after Commit()
+	e.stateRoot = append([]byte(nil), e.app.CommitMultiStore().LastCommitID().Hash...)
 	e.lastHeight = blockHeight
 
 	blockInfo := BlockInfo{
 		Height:  blockHeight,
 		Time:    timestamp.UTC().Format(time.RFC3339),
-		AppHash: fmt.Sprintf("%x", commitResp.Data),
+		AppHash: fmt.Sprintf("%x", e.stateRoot),
 		NumTxs:  len(txs),
 	}
 	e.blocks[blockHeight] = blockInfo
@@ -475,13 +493,10 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 		height = 1
 	}
 
-	queryCtx := e.app.BaseApp.NewContext(false, tmproto.Header{
-		Height: int64(height),
-		Time:   time.Now(),
-	})
+	queryCtx := e.app.BaseApp.NewContext(false).WithBlockHeight(int64(height)).WithBlockTime(time.Now())
 
 	// Set a gas limit to prevent unbounded WASM queries from panicking with out-of-gas.
-	queryCtx = queryCtx.WithGasMeter(sdk.NewGasMeter(e.queryGasMax))
+	queryCtx = queryCtx.WithGasMeter(storetypes.NewGasMeter(e.queryGasMax))
 
 	queryResult, queryErr := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
 	if queryErr != nil {
@@ -783,14 +798,14 @@ func normalizeHash(hash string) string {
 	return strings.ToLower(hash)
 }
 
-func toEvents(events []abci.Event) []TxEvent {
+func toExecTxEvents(events []abci.Event) []TxEvent {
 	out := make([]TxEvent, 0, len(events))
 	for _, event := range events {
 		attributes := make([]TxEventAttribute, 0, len(event.Attributes))
 		for _, attribute := range event.Attributes {
 			attributes = append(attributes, TxEventAttribute{
-				Key:   string(attribute.Key),
-				Value: string(attribute.Value),
+				Key:   attribute.Key,
+				Value: attribute.Value,
 			})
 		}
 		out = append(out, TxEvent{Type: event.Type, Attributes: attributes})

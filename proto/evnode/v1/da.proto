@@ -1,7 +1,7 @@
 syntax = "proto3";
 package evnode.v1;
 
-option go_package = "github.com/evstack/ev-node/types/pb/evnode/v1";
+option go_package = "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1";
 
 // BlockData contains data retrieved from a single DA height.
 message BlockData {

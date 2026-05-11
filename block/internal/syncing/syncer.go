@@ -205,6 +205,22 @@ func (s *Syncer) Start(ctx context.Context) (err error) {
 	// Start main processing loop
 	s.wg.Go(func() { s.processLoop(ctx) })
 
+	// When DAStartHeight is unset and there's no local progress, ask the DA for
+	// its current head so the follower skips the 1→latest sequential walk (which
+	// is intractable on long-running DAs). Failure is non-fatal — DAFollower
+	// normalizes 0 → 1 and catches up the long way.
+	if s.daRetrieverHeight.Load() == 0 {
+		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		latest, queryErr := s.daClient.GetLatestDAHeight(queryCtx)
+		cancel()
+		if queryErr != nil || latest == 0 {
+			s.logger.Warn().Err(queryErr).Msg("failed to auto-detect DA latest height, will sync from height 1")
+		} else {
+			s.logger.Info().Uint64("da_latest", latest).Msg("auto-set DA start height to current DA latest")
+			s.daRetrieverHeight.Store(latest)
+		}
+	}
+
 	// Start the DA follower (subscribe + catchup) and other workers
 	s.daFollower = NewDAFollower(DAFollowerConfig{
 		Client:        s.daClient,

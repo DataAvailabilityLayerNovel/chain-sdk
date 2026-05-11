@@ -313,7 +313,7 @@ func (c *client) GetLatestDAHeight(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("DA network head returned nil header")
 	}
 
-	return header.Height, nil
+	return header.HeaderHeight(), nil
 }
 
 // RetrieveForcedInclusion retrieves blobs from the forced inclusion namespace at the specified height.

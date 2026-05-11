@@ -208,7 +208,7 @@ const file_evnode_v1_signer_proto_rawDesc = "" +
 	"public_key\x18\x01 \x01(\fR\tpublicKey2\x90\x01\n" +
 	"\rSignerService\x127\n" +
 	"\x04Sign\x12\x16.evnode.v1.SignRequest\x1a\x17.evnode.v1.SignResponse\x12F\n" +
-	"\tGetPublic\x12\x1b.evnode.v1.GetPublicRequest\x1a\x1c.evnode.v1.GetPublicResponseB/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
+	"\tGetPublic\x12\x1b.evnode.v1.GetPublicRequest\x1a\x1c.evnode.v1.GetPublicResponseBDZBgithub.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_signer_proto_rawDescOnce sync.Once

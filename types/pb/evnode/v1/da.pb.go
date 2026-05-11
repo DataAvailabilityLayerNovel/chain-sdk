@@ -90,7 +90,7 @@ const file_evnode_v1_da_proto_rawDesc = "" +
 	"\tBlockData\x12\x16\n" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12\x14\n" +
-	"\x05blobs\x18\x03 \x03(\fR\x05blobsB/Z-github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
+	"\x05blobs\x18\x03 \x03(\fR\x05blobsBDZBgithub.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1b\x06proto3"
 
 var (
 	file_evnode_v1_da_proto_rawDescOnce sync.Once

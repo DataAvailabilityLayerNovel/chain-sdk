@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	db "github.com/cometbft/cometbft-db"
+	"cosmossdk.io/log"
 	abciserver "github.com/cometbft/cometbft/abci/server"
-	"github.com/cometbft/cometbft/libs/log"
+	cmtlog "github.com/cometbft/cometbft/libs/log"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/server"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 )
@@ -33,15 +35,17 @@ func main() {
 		_ = database.Close()
 	}()
 
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	logger := log.NewNopLogger()
 	application := app.New(logger, database)
 
-	srv, err := abciserver.NewServer(*listenAddr, "socket", application)
+	cmtLogger := cmtlog.NewTMLogger(cmtlog.NewSyncWriter(os.Stdout))
+	abciApp := server.NewCometABCIWrapper(application)
+	srv, err := abciserver.NewServer(*listenAddr, "socket", abciApp)
 	if err != nil {
 		die("failed to create ABCI server", err)
 	}
 
-	srv.SetLogger(logger)
+	srv.SetLogger(cmtLogger)
 
 	if err := srv.Start(); err != nil {
 		die("failed to start ABCI server", err)
@@ -53,12 +57,12 @@ func main() {
 	select {}
 }
 
-func openDatabase(dataDir string, inMemory bool) (db.DB, error) {
+func openDatabase(dataDir string, inMemory bool) (dbm.DB, error) {
 	if inMemory {
-		return db.NewMemDB(), nil
+		return dbm.NewMemDB(), nil
 	}
 
-	database, err := db.NewGoLevelDB("application", dataDir)
+	database, err := dbm.NewGoLevelDB("application", dataDir, nil)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "resource temporarily unavailable") {
 			return nil, fmt.Errorf("database lock detected at %s (another cosmos-exec process may still be running). stop the other process or run with --in-memory: %w", dataDir, err)

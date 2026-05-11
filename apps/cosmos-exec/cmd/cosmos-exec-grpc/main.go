@@ -17,8 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
+	"cosmossdk.io/log"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/rs/zerolog"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/config"
@@ -67,7 +68,11 @@ func main() {
 		die("failed to open database", err)
 	}
 
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	level, err := zerolog.ParseLevel(cfg.LogLevel)
+	if err != nil || level == zerolog.NoLevel {
+		level = zerolog.InfoLevel
+	}
+	logger := log.NewLogger(os.Stdout, log.LevelOption(level))
 	application := app.New(logger, database)
 
 	// Build executor options.
@@ -195,16 +200,16 @@ func withMetrics(next http.HandlerFunc, m *Metrics, kind string) http.HandlerFun
 	}
 }
 
-func openDatabase(dataDir string, inMemory bool) (db.DB, error) {
+func openDatabase(dataDir string, inMemory bool) (dbm.DB, error) {
 	if inMemory {
-		return db.NewMemDB(), nil
+		return dbm.NewMemDB(), nil
 	}
 
 	if dataDir == "" {
 		dataDir = ".cosmos-exec-grpc/data"
 	}
 
-	database, err := db.NewGoLevelDB("application", dataDir)
+	database, err := dbm.NewGoLevelDB("application", dataDir, nil)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "resource temporarily unavailable") {
 			return nil, fmt.Errorf("database lock detected at %s (another cosmos-exec process may still be running). stop the other process or run with --in-memory: %w", dataDir, err)

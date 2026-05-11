@@ -101,7 +101,11 @@ func NewDAFollower(cfg DAFollowerConfig) DAFollower {
 		catchupSignal: make(chan struct{}, 1),
 		daBlockTime:   cfg.DABlockTime,
 	}
-	f.localNextDAHeight.Store(cfg.StartDAHeight)
+	startHeight := cfg.StartDAHeight
+	if startHeight == 0 {
+		startHeight = 1
+	}
+	f.localNextDAHeight.Store(startHeight)
 	return f
 }
 
@@ -374,6 +378,13 @@ func (f *daFollower) runCatchup(ctx context.Context) {
 // fetchAndPipeHeight retrieves events at a single DA height and pipes them
 // to the syncer.
 func (f *daFollower) fetchAndPipeHeight(ctx context.Context, daHeight uint64) error {
+	// DA heights are 1-indexed. NewDAFollower normalizes StartDAHeight=0 → 1,
+	// so this should be unreachable; treat it as a no-op to avoid a perpetual
+	// retry loop if anything ever stores 0 into localNextDAHeight.
+	if daHeight == 0 {
+		return nil
+	}
+
 	events, err := f.retriever.RetrieveFromDA(ctx, daHeight)
 	if err != nil {
 		switch {

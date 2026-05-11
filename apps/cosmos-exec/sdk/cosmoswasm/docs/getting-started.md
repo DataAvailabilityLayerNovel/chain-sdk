@@ -251,18 +251,18 @@ go 1.25.6
 #### Bước 3: Cài SDK dependency
 
 ```bash
-go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
 ```
 
 Lệnh này:
-- Thêm `require github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm vX.X.X` vào `go.mod`
+- Thêm `require github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm vX.X.X` vào `go.mod`
 - Tạo file `go.sum` (chứa checksums của tất cả dependencies)
 
 > **Nếu develop local** (chưa publish lên GitHub), dùng `replace` directive thay thế:
 >
 > ```bash
 > # Thêm vào cuối go.mod
-> echo 'replace github.com/evstack/ev-node/apps/cosmos-exec => /path/to/ev-node/apps/cosmos-exec' >> go.mod
+> echo 'replace github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec => /path/to/ev-node/apps/cosmos-exec' >> go.mod
 > go mod tidy
 > ```
 
@@ -329,7 +329,7 @@ import (
     "log"
     "time"
 
-    cosmoswasm "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+    cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 )
 
 func main() {
@@ -390,7 +390,7 @@ module my-dapp
 go 1.25.6
 
 require (
-    github.com/evstack/ev-node/apps/cosmos-exec v0.3.0
+    github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec v0.3.0
 )
 ```
 
@@ -400,7 +400,7 @@ require (
 # === Tạo project trong 7 lệnh ===
 mkdir my-dapp && cd my-dapp
 go mod init my-dapp
-go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm
+go get github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm
 mkdir -p artifacts
 cp /path/to/my-counter/artifacts/my_counter.wasm artifacts/
 cat > .env << 'EOF'
@@ -428,6 +428,9 @@ cd /path/to/ev-node
 
 # Load .env
 export $(cat /path/to/my-dapp/.env | xargs)
+
+
+pkill -f cosmos-exec-grpc; pkill -f evcosmos
 
 # Start full E2E stack
 go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go \
@@ -475,6 +478,293 @@ client := cosmoswasm.NewClient(proc.Endpoints.SequencerExecAPI)
 ```
 
 > **Lưu ý:** Cách B cần ev-node repo đã clone (vì `DefaultDALChainConfig` tham chiếu tới `scripts/run-cosmos-wasm-nodes.go`). Path truyền vào là đường dẫn tới thư mục gốc của ev-node repo.
+
+---
+
+## Phase 4.5 — Cấu hình DA Start Height & Query Celestia
+
+Khi chạy fullnode để sync từ sequencer, fullnode cần biết **DA height mà sequencer bắt đầu submit blocks**. Nếu không set đúng, fullnode sẽ báo lỗi:
+
+```
+ERR failed to get blobs error="height is equal to 0"
+WRN catchup error, backing off error="DA retrieval failed: failed to get blobs: height is equal to 0"
+```
+
+### 4.5.1. Tìm DA start height
+
+DA start height = Celestia block height mà sequencer submit blob đầu tiên.
+
+**Cách 1: Xem log sequencer**
+
+```bash
+grep "successfully submitted" .logs/cosmos-wasm-chain.log | head -1
+# Output: ... da_height=620042 ...
+```
+
+**Cách 2: Dùng script `verify-da-submit.sh`** — scan tự động tìm blobs
+
+```bash
+# Scan 80 DA heights gần nhất tìm blobs thuộc namespace trong .env
+./scripts/verify-da-submit.sh
+
+# Output:
+# [run][da-check] da_url=http://103.67.203.71:26758
+# [run][da-check] namespace_input=rollup
+# [run][da-check] scan_range=620000..620080
+# [ok][da-check] blobs_found_at_da_height=620042
+```
+
+Tăng range nếu cần:
+
+```bash
+SCAN_RANGE=500 ./scripts/verify-da-submit.sh
+```
+
+**Cách 3: Dùng script `query_celestia_blob_range.sh`** — scan range cụ thể
+
+```bash
+./scripts/query_celestia_blob_range.sh --from-height 620000 --to-height 620100
+
+# Output cho mỗi height có data:
+# [h=620042] blobs=1
+#   - blob[0] decoded:
+#     {"header":{"height":1,"time":"2026-05-04T10:00:00Z",...}}
+```
+
+### 4.5.2. Set DA start height trong config
+
+Khi start fullnode, truyền `da_start_height` = height tìm được ở bước trên:
+
+```bash
+# Trong genesis.json hoặc config
+{
+  "da_start_height": 620042
+}
+```
+
+Hoặc qua script start node:
+
+```bash
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go \
+  --da-start-height=620042 \
+  --clean-on-start=true \
+  --block-time=2s
+```
+
+### 4.5.3. Query và verify data trên Celestia
+
+Repo có sẵn các scripts trong `scripts/`. Tất cả đều tự đọc `.env` (lấy `DA_BRIDGE_RPC`, `DA_AUTH_TOKEN`, `DA_NAMESPACE`).
+
+#### Script 1: `query_celestia_blob.sh` — Query blob tại 1 DA height
+
+```bash
+# Query theo DA height trực tiếp
+./scripts/query_celestia_blob.sh --height 620042
+
+# Query theo tx hash (tự resolve DA height từ chain)
+./scripts/query_celestia_blob.sh --tx-hash C1AEC991E34C280429DE751ED7DDBBC202EF0C07
+
+# Query theo ev-node block height
+./scripts/query_celestia_blob.sh --block-height 42
+
+# Query latest (lấy DA height mới nhất từ chain log hoặc chain RPC)
+./scripts/query_celestia_blob.sh --latest
+```
+
+Output mẫu:
+
+```
+🔍 Querying Celestia blob...
+   DA Height: 620042
+   Source: explicit height
+   Namespace: AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+   RPC: http://103.67.203.71:26758
+
+📦 Response:
+{ "result": [{ "namespace": "...", "data": "eyJoZWFkZXI...", "share_version": 0 }] }
+
+📝 Decoded data:
+--- blob[0] ---
+{
+  "header": { "height": 1, "time": "2026-05-04T10:00:00Z", "chain_id": "cosmos-wasm-test" },
+  "num_txs": 3
+}
+```
+
+#### Script 2: `query_celestia_blob_range.sh` — Scan nhiều heights
+
+```bash
+# Tìm tất cả blobs trong range
+./scripts/query_celestia_blob_range.sh --from-height 620040 --to-height 620060
+
+# Override namespace (base64)
+./scripts/query_celestia_blob_range.sh \
+  --from-height 620040 --to-height 620060 \
+  --namespace "AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA="
+```
+
+#### Script 3: `watch_celestia_latest_blobs.sh` — Watch realtime
+
+```bash
+# Watch liên tục (mỗi 6s poll)
+./scripts/watch_celestia_latest_blobs.sh
+
+# Custom: poll mỗi 3s, backfill 30 heights ban đầu
+./scripts/watch_celestia_latest_blobs.sh --interval 3 --backfill 30
+
+# Bắt đầu từ height cụ thể
+./scripts/watch_celestia_latest_blobs.sh --start-height 620040
+
+# Chỉ query 1 lần rồi thoát
+./scripts/watch_celestia_latest_blobs.sh --start-height 620042 --once
+```
+
+Output mẫu (realtime):
+
+```
+👀 Watching latest Celestia blobs
+   RPC: http://103.67.203.71:26758
+   Namespace: AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+   Interval: 6s
+
+[2026-05-04 17:30:12] [h=620042] blobs=1
+  - blob[0] decoded:
+    {"header":{"height":1},"num_txs":3}
+[2026-05-04 17:30:18] [h=620048] blobs=1
+  - blob[0] decoded:
+    {"header":{"height":2},"num_txs":1}
+```
+
+#### Script 4: `query_celestia_proof.sh` — Get blob inclusion proof
+
+```bash
+# Get NMT inclusion proof cho blob đầu tiên tại height
+./scripts/query_celestia_proof.sh --height 620042
+
+# Get proof cho blob cụ thể (index 1)
+./scripts/query_celestia_proof.sh --height 620042 --index 1
+
+# Get proofs cho tất cả blobs tại height
+./scripts/query_celestia_proof.sh --height 620042 --all
+
+# Chỉ verify (exit 0 nếu proof valid, exit 1 nếu không)
+./scripts/query_celestia_proof.sh --height 620042 --verify
+```
+
+Output mẫu:
+
+```
+🔐 Celestia Blob Inclusion Proof
+   DA Height:  620042
+   Namespace:  AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+   Blobs:      1
+   RPC:        http://103.67.203.71:26758
+
+   Data Root:  a4f2c8e1b3d7...
+
+--- Proof for blob[0] ---
+  blob_index:    0
+  commitment:    kLe3x/2B7qFd...
+  blob_size:     1284 bytes (base64)
+  proof_nodes:   3
+  proof_valid:   true (non-empty NMT proof)
+  share_range:   start=1 end=4
+  proof_detail:
+    - start=1 end=4 nodes=2
+
+📋 Raw proof JSON (for programmatic use):
+{ "jsonrpc": "2.0", "id": 1, "result": [...] }
+```
+
+#### Script 5: `query_celestia_status.sh` — Check Celestia node status
+
+```bash
+./scripts/query_celestia_status.sh
+```
+
+Output mẫu:
+
+```
+📡 Celestia DA Node Status
+   RPC: http://103.67.203.71:26758
+
+   Network Head:
+     height: 620100
+     time:   2026-05-04T17:30:00Z
+
+   Local Head:
+     height: 620098
+     time:   2026-05-04T17:29:48Z
+
+   Sync: ✅ synced (behind 2 blocks)
+
+   Node:
+     peer_id: 12D3KooWAbC1...
+     addrs:   4
+
+   DAS (Data Availability Sampling):
+     sampled_head: 620095
+     catchup_head: 620098
+```
+
+#### Script 6: `encode-namespace.sh` — Encode namespace
+
+```bash
+# Text → base64 namespace (29 bytes, zero-padded)
+./scripts/encode-namespace.sh --text rollup
+# Output: AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+
+./scripts/encode-namespace.sh --text my-counter-app
+# Output: AAAAAAAAAAAAAAAAAAG15LWNvdW50ZXItYXBw
+
+# Hex → base64
+./scripts/encode-namespace.sh --hex 00000000000000000000000000000000000000726F6C6C7570
+# Output: AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+```
+
+#### Tổng hợp scripts
+
+| Script | Mục đích |
+|--------|----------|
+| `scripts/verify-da-submit.sh` | Scan ngược từ head tìm DA height có blobs |
+| `scripts/query_celestia_blob.sh` | Query 1 blob (theo height/tx-hash/block/latest) |
+| `scripts/query_celestia_blob_range.sh` | Scan range nhiều heights |
+| `scripts/watch_celestia_latest_blobs.sh` | Watch realtime blobs mới |
+| `scripts/query_celestia_proof.sh` | Get NMT inclusion proof |
+| `scripts/query_celestia_status.sh` | Check Celestia node sync status |
+| `scripts/encode-namespace.sh` | Encode text/hex → base64 namespace |
+
+### 4.5.4. Troubleshooting DA errors
+
+| Lỗi | Nguyên nhân | Fix |
+|-----|-------------|-----|
+| `height is equal to 0` | `da_start_height` chưa set hoặc = 0 | Set đúng DA height (xem 4.5.1) |
+| `Method not found (-32601)` | Celestia node không hỗ trợ method (wrong endpoint) | Dùng Bridge node RPC (`DA_BRIDGE_RPC`, port 26658), không phải Consensus RPC (port 26657) |
+| `blob: not found` | Không có data tại height đó trong namespace | Chạy `./scripts/verify-da-submit.sh` kiểm tra |
+| `header: given height is from the future` | DA height > chain head | Chờ Celestia sync thêm blocks |
+| `context deadline exceeded` | Celestia node quá chậm hoặc không reachable | Kiểm tra network, tăng timeout |
+
+### 4.5.5. Cấu hình .env cho DA
+
+```bash
+# === DA Layer Config ===
+# Bridge RPC (dùng cho query blob) — port 26758 (bridge node)
+DA_BRIDGE_RPC=http://103.67.203.71:26758
+
+# Consensus RPC (dùng cho submit header) — port 14657/26657
+DA_RPC=http://103.67.203.71:14657
+
+# Auth token (lấy từ: celestia light auth admin)
+DA_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIs...
+
+# Namespace — có thể dùng hex hoặc base64:
+DA_NAMESPACE=00000000000000000000000000000000000000726F6C6C7570
+DA_NAMESPACE_B64=AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+
+# Encode namespace từ text:
+# ./scripts/encode-namespace.sh --text rollup
+# → AAAAAAAAAAAAAAAAAAAAAAAAAAByb2xsdXA=
+```
 
 ---
 

@@ -6,39 +6,46 @@ import (
 	"strings"
 	"time"
 
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
+	"cosmossdk.io/x/tx/signing"
 	wasmmodule "github.com/CosmWasm/wasmd/x/wasm"
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-	db "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/libs/log"
+	dbm "github.com/cosmos/cosmos-db"
+	gogoproto "github.com/cosmos/gogoproto/proto"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/std"
-	storetypes "github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authmodule "github.com/cosmos/cosmos-sdk/x/auth"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authtx "github.com/cosmos/cosmos-sdk/x/auth/tx"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	authcodec "github.com/cosmos/cosmos-sdk/x/auth/codec"
 	bankmodule "github.com/cosmos/cosmos-sdk/x/bank"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	capabilitymodule "github.com/cosmos/cosmos-sdk/x/capability"
-	capabilitykeeper "github.com/cosmos/cosmos-sdk/x/capability/keeper"
-	capabilitytypes "github.com/cosmos/cosmos-sdk/x/capability/types"
+	"github.com/cosmos/cosmos-sdk/x/consensus"
+	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
+	consensustypes "github.com/cosmos/cosmos-sdk/x/consensus/types"
 	paramsmodule "github.com/cosmos/cosmos-sdk/x/params"
 	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
 	paramtypes "github.com/cosmos/cosmos-sdk/x/params/types"
-	ibctransfermodule "github.com/cosmos/ibc-go/v7/modules/apps/transfer"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v7/modules/apps/transfer/keeper"
-	ibctransfertypes "github.com/cosmos/ibc-go/v7/modules/apps/transfer/types"
-	ibcmodule "github.com/cosmos/ibc-go/v7/modules/core"
-	porttypes "github.com/cosmos/ibc-go/v7/modules/core/05-port/types"
-	ibcexported "github.com/cosmos/ibc-go/v7/modules/core/exported"
-	ibckeeper "github.com/cosmos/ibc-go/v7/modules/core/keeper"
+	capabilitymodule "github.com/cosmos/ibc-go/modules/capability"
+	capabilitykeeper "github.com/cosmos/ibc-go/modules/capability/keeper"
+	capabilitytypes "github.com/cosmos/ibc-go/modules/capability/types"
+	ibctransfermodule "github.com/cosmos/ibc-go/v8/modules/apps/transfer"
+	ibctransferkeeper "github.com/cosmos/ibc-go/v8/modules/apps/transfer/keeper"
+	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
+	ibcmodule "github.com/cosmos/ibc-go/v8/modules/core"
+	porttypes "github.com/cosmos/ibc-go/v8/modules/core/05-port/types"
+	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
+	ibckeeper "github.com/cosmos/ibc-go/v8/modules/core/keeper"
 )
 
 var (
@@ -59,6 +66,7 @@ type App struct {
 	ModuleBasics module.BasicManager
 
 	ParamsKeeper         paramskeeper.Keeper
+	ConsensusKeeper      consensuskeeper.Keeper
 	CapabilityKeeper     *capabilitykeeper.Keeper
 	ScopedIBCKeeper      capabilitykeeper.ScopedKeeper
 	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
@@ -73,8 +81,21 @@ type App struct {
 	ModuleManager *module.Manager
 }
 
-func New(logger log.Logger, database db.DB, chainID ...string) *App {
-	interfaceRegistry := types.NewInterfaceRegistry()
+func New(logger log.Logger, database dbm.DB, chainID ...string) *App {
+	// SDK 0.50+ requires explicit address codecs on the InterfaceRegistry,
+	// otherwise tx signing/decoding fails with
+	// "InterfaceRegistry requires a proper address codec implementation".
+	cfg := sdk.GetConfig()
+	interfaceRegistry, err := types.NewInterfaceRegistryWithOptions(types.InterfaceRegistryOptions{
+		ProtoFiles: gogoproto.HybridResolver,
+		SigningOptions: signing.Options{
+			AddressCodec:          authcodec.NewBech32Codec(cfg.GetBech32AccountAddrPrefix()),
+			ValidatorAddressCodec: authcodec.NewBech32Codec(cfg.GetBech32ValidatorAddrPrefix()),
+		},
+	})
+	if err != nil {
+		panic(fmt.Errorf("init InterfaceRegistry: %w", err))
+	}
 
 	legacyAmino := codec.NewLegacyAmino()
 
@@ -83,7 +104,8 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 		authmodule.AppModuleBasic{},
 		bankmodule.AppModuleBasic{},
 		paramsmodule.AppModuleBasic{},
-		capabilitymodule.NewAppModuleBasic(appCodec),
+		capabilitymodule.AppModuleBasic{},
+		consensus.AppModuleBasic{},
 		ibcmodule.AppModuleBasic{},
 		ibctransfermodule.AppModuleBasic{},
 		wasmmodule.AppModuleBasic{},
@@ -104,17 +126,18 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 	base := baseapp.NewBaseApp("cosmos-exec", logger, database, txConfig.TxDecoder(), baseOpts...)
 	base.SetInterfaceRegistry(interfaceRegistry)
 
-	keys := sdk.NewKVStoreKeys(
+	keys := storetypes.NewKVStoreKeys(
 		authtypes.StoreKey,
 		banktypes.StoreKey,
 		paramtypes.StoreKey,
+		consensustypes.StoreKey,
 		capabilitytypes.StoreKey,
 		ibcexported.StoreKey,
 		ibctransfertypes.StoreKey,
 		wasmtypes.StoreKey,
 	)
-	tkeys := sdk.NewTransientStoreKeys(paramtypes.TStoreKey)
-	memKeys := sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
+	tkeys := storetypes.NewTransientStoreKeys(paramtypes.TStoreKey)
+	memKeys := storetypes.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
 
 	for _, key := range keys {
 		base.MountStore(key, storetypes.StoreTypeIAVL)
@@ -137,21 +160,25 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 
 	app.ParamsKeeper = initParamsKeeper(appCodec, legacyAmino, keys[paramtypes.StoreKey], tkeys[paramtypes.TStoreKey])
 
+	app.ConsensusKeeper = consensuskeeper.NewKeeper(
+		appCodec,
+		runtime.NewKVStoreService(keys[consensustypes.StoreKey]),
+		authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
+		runtime.EventService{},
+	)
+
 	app.CapabilityKeeper = capabilitykeeper.NewKeeper(appCodec, keys[capabilitytypes.StoreKey], memKeys[capabilitytypes.MemStoreKey])
 	app.ScopedIBCKeeper = app.CapabilityKeeper.ScopeToModule(ibcexported.ModuleName)
 	app.ScopedTransferKeeper = app.CapabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
 	app.ScopedWasmKeeper = app.CapabilityKeeper.ScopeToModule(wasmtypes.ModuleName)
 	app.CapabilityKeeper.Seal()
 
-	ibcSubspace := app.ParamsKeeper.Subspace(ibcexported.ModuleName)
-	transferSubspace := app.ParamsKeeper.Subspace(ibctransfertypes.ModuleName)
-	wasmSubspace := app.ParamsKeeper.Subspace(wasmtypes.ModuleName)
-
 	app.AccountKeeper = authkeeper.NewAccountKeeper(
 		appCodec,
-		keys[authtypes.StoreKey],
+		runtime.NewKVStoreService(keys[authtypes.StoreKey]),
 		authtypes.ProtoBaseAccount,
 		maccPerms,
+		authcodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
 		sdk.GetConfig().GetBech32AccountAddrPrefix(),
 		authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
 	)
@@ -163,10 +190,11 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 
 	app.BankKeeper = bankkeeper.NewBaseKeeper(
 		appCodec,
-		keys[banktypes.StoreKey],
+		runtime.NewKVStoreService(keys[banktypes.StoreKey]),
 		app.AccountKeeper,
 		blockedAddrs,
 		authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
+		logger,
 	)
 
 	ibcStakingKeeper := ibcClientStakingKeeper{enabled: true}
@@ -174,22 +202,24 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 	app.IBCKeeper = ibckeeper.NewKeeper(
 		appCodec,
 		keys[ibcexported.StoreKey],
-		ibcSubspace,
+		app.GetSubspace(ibcexported.ModuleName),
 		ibcStakingKeeper,
 		ibcUpgradeKeeper,
 		app.ScopedIBCKeeper,
+		authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
 	)
 
 	app.TransferKeeper = ibctransferkeeper.NewKeeper(
 		appCodec,
 		keys[ibctransfertypes.StoreKey],
-		transferSubspace,
+		app.GetSubspace(ibctransfertypes.ModuleName),
 		app.IBCKeeper.ChannelKeeper,
 		app.IBCKeeper.ChannelKeeper,
-		&app.IBCKeeper.PortKeeper,
+		app.IBCKeeper.PortKeeper,
 		app.AccountKeeper,
 		app.BankKeeper,
 		app.ScopedTransferKeeper,
+		authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
 	)
 
 	wasmConfig := wasmtypes.DefaultWasmConfig()
@@ -209,14 +239,14 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 
 	app.WasmKeeper = wasmkeeper.NewKeeper(
 		appCodec,
-		keys[wasmtypes.StoreKey],
+		runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
 		app.AccountKeeper,
 		app.BankKeeper,
 		stakingKeeper,
 		distributionKeeper,
 		app.IBCKeeper.ChannelKeeper,
 		app.IBCKeeper.ChannelKeeper,
-		&app.IBCKeeper.PortKeeper,
+		app.IBCKeeper.PortKeeper,
 		app.ScopedWasmKeeper,
 		app.TransferKeeper,
 		app.MsgServiceRouter(),
@@ -234,17 +264,19 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 	app.ModuleManager = module.NewManager(
 		paramsmodule.NewAppModule(app.ParamsKeeper),
 		capabilitymodule.NewAppModule(appCodec, *app.CapabilityKeeper, false),
-		authmodule.NewAppModule(appCodec, app.AccountKeeper, nil, nil),
-		bankmodule.NewAppModule(appCodec, app.BankKeeper, app.AccountKeeper, nil),
+		consensus.NewAppModule(appCodec, app.ConsensusKeeper),
+		authmodule.NewAppModule(appCodec, app.AccountKeeper, nil, app.GetSubspace(authtypes.ModuleName)),
+		bankmodule.NewAppModule(appCodec, app.BankKeeper, app.AccountKeeper, app.GetSubspace(banktypes.ModuleName)),
 		ibcmodule.NewAppModule(app.IBCKeeper),
 		ibctransfermodule.NewAppModule(app.TransferKeeper),
-		wasmmodule.NewAppModule(appCodec, &app.WasmKeeper, nil, app.AccountKeeper, app.BankKeeper, app.MsgServiceRouter(), wasmSubspace),
+		wasmmodule.NewAppModule(appCodec, &app.WasmKeeper, stakingKeeper, app.AccountKeeper, app.BankKeeper, app.MsgServiceRouter(), app.GetSubspace(wasmtypes.ModuleName)),
 	)
 	app.ModuleManager.SetOrderInitGenesis(
 		paramtypes.ModuleName,
 		capabilitytypes.ModuleName,
 		authtypes.ModuleName,
 		banktypes.ModuleName,
+		consensustypes.ModuleName,
 		ibcexported.ModuleName,
 		ibctransfertypes.ModuleName,
 		wasmtypes.ModuleName,
@@ -263,36 +295,34 @@ func New(logger log.Logger, database db.DB, chainID ...string) *App {
 	return app
 }
 
-func (app *App) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
-	return app.ModuleManager.BeginBlock(ctx, req)
+func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
+	return app.ModuleManager.BeginBlock(ctx)
 }
 
-func (app *App) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
-	return app.ModuleManager.EndBlock(ctx, req)
+func (app *App) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
+	return app.ModuleManager.EndBlock(ctx)
 }
 
-func (app *App) InitChainer(ctx sdk.Context, req abci.RequestInitChain) (resp abci.ResponseInitChain) {
+func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	var genesisState map[string]json.RawMessage
 	if len(req.AppStateBytes) == 0 {
 		genesisState = app.ModuleBasics.DefaultGenesis(app.appCodec)
 	} else {
 		if err := json.Unmarshal(req.AppStateBytes, &genesisState); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			message := fmt.Sprint(recovered)
-			if strings.Contains(message, "validator set is empty after InitGenesis") {
-				resp = abci.ResponseInitChain{Validators: req.Validators}
-				return
-			}
-			panic(recovered)
+	resp, err := app.ModuleManager.InitGenesis(ctx, app.appCodec, genesisState)
+	if err != nil {
+		// Recover from "validator set is empty" panic-as-error
+		if strings.Contains(err.Error(), "validator set is empty after InitGenesis") {
+			return &abci.ResponseInitChain{Validators: req.Validators}, nil
 		}
-	}()
+		return nil, err
+	}
 
-	return app.ModuleManager.InitGenesis(ctx, app.appCodec, genesisState)
+	return resp, nil
 }
 
 func (app *App) DefaultGenesis() []byte {
@@ -304,12 +334,21 @@ func (app *App) DefaultGenesis() []byte {
 	return bz
 }
 
-func (app *App) InitChainWithDefaultGenesis(chainID string) abci.ResponseInitChain {
-	return app.InitChain(abci.RequestInitChain{
+func (app *App) InitChainWithDefaultGenesis(chainID string) *abci.ResponseInitChain {
+	resp, err := app.InitChain(&abci.RequestInitChain{
 		Time:          time.Now(),
 		ChainId:       chainID,
 		AppStateBytes: app.DefaultGenesis(),
 	})
+	if err != nil {
+		panic(fmt.Sprintf("init chain failed: %v", err))
+	}
+	return resp
+}
+
+func (app *App) GetSubspace(moduleName string) paramtypes.Subspace {
+	subspace, _ := app.ParamsKeeper.GetSubspace(moduleName)
+	return subspace
 }
 
 func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino, key, tkey storetypes.StoreKey) paramskeeper.Keeper {

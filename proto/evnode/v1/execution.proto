@@ -3,7 +3,7 @@ package evnode.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/evstack/ev-node/types/pb/evnode/v1";
+option go_package = "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1";
 
 // ExecutorService defines the execution layer interface for EVNode
 service ExecutorService {

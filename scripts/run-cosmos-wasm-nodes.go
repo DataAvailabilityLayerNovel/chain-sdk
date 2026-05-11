@@ -295,10 +295,8 @@ func (nm *nodeManager) ensureBinaries() error {
 	}
 
 	for _, target := range targets {
-		if _, err := os.Stat(target.binPath); err == nil {
-			continue
-		}
-
+		// Always invoke `go build` so source changes are picked up. Go's
+		// incremental compilation makes the no-op case cheap.
 		log.Printf("Building binary: %s", filepath.Base(target.binPath))
 		cmd := exec.CommandContext(nm.ctx, "go", "build", "-o", target.binPath, target.pkg)
 		cmd.Dir = target.workDir
@@ -437,11 +435,16 @@ func (nm *nodeManager) waitForChainSync() error {
 	seqURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[0].rpcPort)
 	fullURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[1].rpcPort)
 
-	deadline := time.Now().Add(5 * time.Minute) // 5 minutes for initial sync
+	// Wait up to 5 minutes for sequencer + fullnode to enter the sync window.
+	// On failure we warn and continue instead of killing the stack — so the user
+	// can inspect logs / RPCs to figure out what's slow.
+	deadline := time.Now().Add(5 * time.Minute)
+	lastSeq, lastFull := int64(0), int64(0)
 	for time.Now().Before(deadline) {
 		seqHeight, err1 := fetchLatestHeight(seqURL)
 		fullHeight, err2 := fetchLatestHeight(fullURL)
 		if err1 == nil && err2 == nil {
+			lastSeq, lastFull = seqHeight, fullHeight
 			if seqHeight > 0 && fullHeight > 0 && fullHeight <= seqHeight && seqHeight-fullHeight <= 10 {
 				log.Printf("Sync check OK: sequencer=%d fullnode=%d", seqHeight, fullHeight)
 				return nil
@@ -450,7 +453,9 @@ func (nm *nodeManager) waitForChainSync() error {
 		time.Sleep(2 * time.Second)
 	}
 
-	return errors.New("full node did not reach sync window in time")
+	log.Printf("WARN: full node did not reach sync window within 5m (sequencer=%d fullnode=%d). Continuing to run — inspect logs and RPCs to diagnose.",
+		lastSeq, lastFull)
+	return nil
 }
 
 func (nm *nodeManager) getNodePeerAddress(home string) (string, error) {

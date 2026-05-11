@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -42,6 +43,18 @@ func (h *Header) Time() time.Time {
 		return h.Header.Time
 	}
 	return h.BlockTime
+}
+
+// HeaderHeight returns the DA block height, preferring the nested header.height
+// (where celestia-node actually places it in ExtendedHeader responses) and
+// falling back to the top-level field.
+func (h *Header) HeaderHeight() uint64 {
+	if h.Header.Height != "" {
+		if v, err := strconv.ParseUint(h.Header.Height, 10, 64); err == nil {
+			return v
+		}
+	}
+	return h.Height
 }
 
 // HeaderAPI mirrors celestia-node's header module.

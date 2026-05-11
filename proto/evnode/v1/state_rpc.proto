@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "evnode/v1/evnode.proto";
 import "evnode/v1/state.proto";
 
-option go_package = "github.com/evstack/ev-node/types/pb/evnode/v1";
+option go_package = "github.com/DataAvailabilityLayerNovel/chain-sdk/types/pb/evnode/v1";
 
 // StoreService defines the RPC service for the store package
 service StoreService {

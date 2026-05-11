@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	db "github.com/cometbft/cometbft-db"
-	"github.com/cometbft/cometbft/libs/log"
+	"cosmossdk.io/log"
+	dbm "github.com/cosmos/cosmos-db"
 
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
@@ -19,7 +19,7 @@ import (
 
 func newTestExecutor(t *testing.T) *executor.CosmosExecutor {
 	t.Helper()
-	return executor.New(app.New(log.NewNopLogger(), db.NewMemDB()))
+	return executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
 }
 
 func initExecutor(t *testing.T, exec *executor.CosmosExecutor) []byte {

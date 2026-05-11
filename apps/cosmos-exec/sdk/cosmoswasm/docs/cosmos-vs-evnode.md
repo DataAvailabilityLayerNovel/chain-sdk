@@ -341,7 +341,7 @@ func (c *EnhancedExecutorClient) httpCall(ctx context.Context, httpMethod, path 
 }
 ```
 
-**Tại sao không dùng v1connect?** Vì generated code (`v1connect/execution.connect.go`) import path `DataAvailabilityLayerNovel/chain-sdk` — legacy module path gây conflict với `evstack/ev-node`. Pure HTTP client **tránh hoàn toàn dependency chain** này.
+**Tại sao dùng pure HTTP?** Để tránh dependency vào generated code (`v1connect/execution.connect.go`), giảm coupling giữa cosmos-wasm và protobuf layer. Pure HTTP client đơn giản hơn và dễ maintain.
 
 **Trade-off:**
 - Pro: Không dependency vào generated code, compile ổn định

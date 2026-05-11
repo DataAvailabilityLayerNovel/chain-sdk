@@ -372,25 +372,27 @@ func (e *Executor) executionLoop() {
 	e.logger.Info().Msg("starting execution loop")
 	defer e.logger.Info().Msg("execution loop stopped")
 
-	var delay time.Duration
 	initialHeight := e.genesis.InitialHeight
 	currentState := e.getLastState()
 
+	var firstBlockDelay time.Duration
 	if currentState.LastBlockHeight < initialHeight {
-		delay = time.Until(e.genesis.StartTime.Add(e.config.Node.BlockTime.Duration))
+		// Fresh start: produce block 1 immediately so syncing fullnodes can
+		// bootstrap their P2P header store right away. Waiting block_time
+		// before the first block leaves fullnodes retrying against an empty
+		// header store, which can blow past their P2P init timeout.
+		firstBlockDelay = 0
 	} else {
-		delay = time.Until(currentState.LastBlockTime.Add(e.config.Node.BlockTime.Duration))
+		firstBlockDelay = time.Until(currentState.LastBlockTime.Add(e.config.Node.BlockTime.Duration))
 	}
-	if delay > 0 {
-		e.logger.Info().Dur("delay", delay).Msg("waiting to start block production")
-		select {
-		case <-e.ctx.Done():
-			return
-		case <-time.After(delay):
-		}
+	if firstBlockDelay < 0 {
+		firstBlockDelay = 0
+	}
+	if firstBlockDelay > 0 {
+		e.logger.Info().Dur("delay", firstBlockDelay).Msg("waiting to start block production")
 	}
 
-	blockTimer := time.NewTimer(e.config.Node.BlockTime.Duration)
+	blockTimer := time.NewTimer(firstBlockDelay)
 	defer blockTimer.Stop()
 
 	var lazyTimer *time.Timer

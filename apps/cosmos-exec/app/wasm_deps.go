@@ -4,12 +4,15 @@ import (
 	"context"
 	"time"
 
+	"cosmossdk.io/math"
+	abci "github.com/cometbft/cometbft/abci/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 )
 
+// noopDistributionKeeper satisfies the wasmtypes.DistributionKeeper interface.
 type noopDistributionKeeper struct{}
 
 func (noopDistributionKeeper) DelegatorWithdrawAddress(_ context.Context, _ *distrtypes.QueryDelegatorWithdrawAddressRequest) (*distrtypes.QueryDelegatorWithdrawAddressResponse, error) {
@@ -28,94 +31,90 @@ func (noopDistributionKeeper) DelegatorValidators(_ context.Context, _ *distrtyp
 	return &distrtypes.QueryDelegatorValidatorsResponse{}, nil
 }
 
+// noopStakingKeeper satisfies the wasmtypes.StakingKeeper and
+// wasmkeeper.ValidatorSetSource interfaces.
 type noopStakingKeeper struct{}
 
-func (noopStakingKeeper) BondDenom(_ sdk.Context) string {
-	return "stake"
+func (noopStakingKeeper) BondDenom(_ context.Context) (string, error) {
+	return "stake", nil
 }
 
-func (noopStakingKeeper) GetValidator(_ sdk.Context, _ sdk.ValAddress) (stakingtypes.Validator, bool) {
-	return stakingtypes.Validator{}, false
+func (noopStakingKeeper) GetValidator(_ context.Context, _ sdk.ValAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{}, stakingtypes.ErrNoValidatorFound
 }
 
-func (noopStakingKeeper) GetBondedValidatorsByPower(_ sdk.Context) []stakingtypes.Validator {
-	return nil
+func (noopStakingKeeper) GetBondedValidatorsByPower(_ context.Context) ([]stakingtypes.Validator, error) {
+	return nil, nil
 }
 
-func (noopStakingKeeper) GetAllDelegatorDelegations(_ sdk.Context, _ sdk.AccAddress) []stakingtypes.Delegation {
-	return nil
+func (noopStakingKeeper) GetAllDelegatorDelegations(_ context.Context, _ sdk.AccAddress) ([]stakingtypes.Delegation, error) {
+	return nil, nil
 }
 
-func (noopStakingKeeper) GetDelegation(_ sdk.Context, _ sdk.AccAddress, _ sdk.ValAddress) (stakingtypes.Delegation, bool) {
-	return stakingtypes.Delegation{}, false
+func (noopStakingKeeper) GetDelegation(_ context.Context, _ sdk.AccAddress, _ sdk.ValAddress) (stakingtypes.Delegation, error) {
+	return stakingtypes.Delegation{}, stakingtypes.ErrNoDelegation
 }
 
-func (noopStakingKeeper) HasReceivingRedelegation(_ sdk.Context, _ sdk.AccAddress, _ sdk.ValAddress) bool {
-	return false
+func (noopStakingKeeper) HasReceivingRedelegation(_ context.Context, _ sdk.AccAddress, _ sdk.ValAddress) (bool, error) {
+	return false, nil
 }
 
+func (noopStakingKeeper) ApplyAndReturnValidatorSetUpdates(_ context.Context) ([]abci.ValidatorUpdate, error) {
+	return nil, nil
+}
+
+func (noopStakingKeeper) TotalBondedTokens(_ context.Context) (math.Int, error) {
+	return math.ZeroInt(), nil
+}
+
+// ibcClientStakingKeeper satisfies the IBC staking keeper interface.
 type ibcClientStakingKeeper struct {
 	enabled bool
 }
 
-func (k ibcClientStakingKeeper) GetHistoricalInfo(_ sdk.Context, _ int64) (stakingtypes.HistoricalInfo, bool) {
+func (k ibcClientStakingKeeper) GetHistoricalInfo(_ context.Context, _ int64) (stakingtypes.HistoricalInfo, error) {
 	if !k.enabled {
-		return stakingtypes.HistoricalInfo{}, false
+		return stakingtypes.HistoricalInfo{}, stakingtypes.ErrNoHistoricalInfo
 	}
-	return stakingtypes.HistoricalInfo{}, true
+	return stakingtypes.HistoricalInfo{}, nil
 }
 
-func (k ibcClientStakingKeeper) UnbondingTime(_ sdk.Context) time.Duration {
+func (k ibcClientStakingKeeper) UnbondingTime(_ context.Context) (time.Duration, error) {
 	if !k.enabled {
-		return 0
+		return 0, nil
 	}
-	return 24 * time.Hour
+	return 24 * time.Hour, nil
 }
 
+// ibcClientUpgradeKeeper satisfies the IBC upgrade keeper interface.
 type ibcClientUpgradeKeeper struct {
 	enabled bool
 }
 
-func (k ibcClientUpgradeKeeper) ClearIBCState(_ sdk.Context, _ int64) {}
-
-func (k ibcClientUpgradeKeeper) GetUpgradePlan(_ sdk.Context) (upgradetypes.Plan, bool) {
-	if !k.enabled {
-		return upgradetypes.Plan{}, false
-	}
-	return upgradetypes.Plan{}, false
-}
-
-func (k ibcClientUpgradeKeeper) GetUpgradedClient(_ sdk.Context, _ int64) ([]byte, bool) {
-	if !k.enabled {
-		return nil, false
-	}
-	return nil, false
-}
-
-func (k ibcClientUpgradeKeeper) SetUpgradedClient(_ sdk.Context, _ int64, _ []byte) error {
-	if !k.enabled {
-		return nil
-	}
+func (k ibcClientUpgradeKeeper) ClearIBCState(_ context.Context, _ int64) error {
 	return nil
 }
 
-func (k ibcClientUpgradeKeeper) GetUpgradedConsensusState(_ sdk.Context, _ int64) ([]byte, bool) {
-	if !k.enabled {
-		return nil, false
-	}
-	return nil, false
+func (k ibcClientUpgradeKeeper) GetUpgradePlan(_ context.Context) (upgradetypes.Plan, error) {
+	return upgradetypes.Plan{}, nil
 }
 
-func (k ibcClientUpgradeKeeper) SetUpgradedConsensusState(_ sdk.Context, _ int64, _ []byte) error {
-	if !k.enabled {
-		return nil
-	}
+func (k ibcClientUpgradeKeeper) GetUpgradedClient(_ context.Context, _ int64) ([]byte, error) {
+	return nil, nil
+}
+
+func (k ibcClientUpgradeKeeper) SetUpgradedClient(_ context.Context, _ int64, _ []byte) error {
 	return nil
 }
 
-func (k ibcClientUpgradeKeeper) ScheduleUpgrade(_ sdk.Context, _ upgradetypes.Plan) error {
-	if !k.enabled {
-		return nil
-	}
+func (k ibcClientUpgradeKeeper) GetUpgradedConsensusState(_ context.Context, _ int64) ([]byte, error) {
+	return nil, nil
+}
+
+func (k ibcClientUpgradeKeeper) SetUpgradedConsensusState(_ context.Context, _ int64, _ []byte) error {
+	return nil
+}
+
+func (k ibcClientUpgradeKeeper) ScheduleUpgrade(_ context.Context, _ upgradetypes.Plan) error {
 	return nil
 }

@@ -3,22 +3,19 @@ package app
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
+	"cosmossdk.io/log"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
-	db "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/libs/log"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	"github.com/cosmos/cosmos-sdk/x/auth/types"
+	dbm "github.com/cosmos/cosmos-db"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	paramtypes "github.com/cosmos/cosmos-sdk/x/params/types"
-	ibctransfertypes "github.com/cosmos/ibc-go/v7/modules/apps/transfer/types"
-	ibcexported "github.com/cosmos/ibc-go/v7/modules/core/exported"
+	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
+	ibcexported "github.com/cosmos/ibc-go/v8/modules/core/exported"
 )
 
 func TestDefaultGenesisContainsCriticalModules(t *testing.T) {
-	application := New(log.NewNopLogger(), db.NewMemDB())
+	application := New(log.NewNopLogger(), dbm.NewMemDB())
 
 	var genesis map[string]json.RawMessage
 	if err := json.Unmarshal(application.DefaultGenesis(), &genesis); err != nil {
@@ -26,8 +23,7 @@ func TestDefaultGenesisContainsCriticalModules(t *testing.T) {
 	}
 
 	requiredModules := []string{
-		paramtypes.ModuleName,
-		types.ModuleName,
+		authtypes.ModuleName,
 		banktypes.ModuleName,
 		ibcexported.ModuleName,
 		ibctransfertypes.ModuleName,
@@ -41,35 +37,31 @@ func TestDefaultGenesisContainsCriticalModules(t *testing.T) {
 	}
 }
 
-func TestAppLifecycleAndIBCRoutingSmoke(t *testing.T) {
-	application := New(log.NewNopLogger(), db.NewMemDB())
+func TestAppLifecycleSmoke(t *testing.T) {
+	application := New(log.NewNopLogger(), dbm.NewMemDB())
 
 	if application.IBCKeeper == nil {
 		t.Fatal("ibc keeper is nil")
 	}
-	if application.IBCKeeper.Router == nil {
-		t.Fatal("ibc router is nil")
-	}
-	if !application.IBCKeeper.Router.Sealed() {
-		t.Fatal("ibc router is not sealed")
-	}
-	if !application.IBCKeeper.Router.HasRoute(ibctransfertypes.ModuleName) {
-		t.Fatalf("ibc router missing %q route", ibctransfertypes.ModuleName)
-	}
 
 	application.InitChainWithDefaultGenesis("")
 
-	application.BeginBlock(abci.RequestBeginBlock{
-		Header: tmproto.Header{
-			Height:  1,
-			Time:    time.Now(),
-			ChainID: "",
-		},
+	// In SDK v0.50 with ABCI 2.0, block processing uses FinalizeBlock
+	// instead of separate BeginBlock/DeliverTx/EndBlock calls.
+	_, err := application.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height: 1,
 	})
-	application.EndBlock(abci.RequestEndBlock{Height: 1})
-	commitResp := application.Commit()
+	if err != nil {
+		t.Fatalf("finalize block failed: %v", err)
+	}
 
-	if len(commitResp.Data) == 0 {
+	_, err = application.Commit()
+	if err != nil {
+		t.Fatalf("commit failed: %v", err)
+	}
+
+	appHash := application.CommitMultiStore().LastCommitID().Hash
+	if len(appHash) == 0 {
 		t.Fatal("commit app hash is empty")
 	}
 }

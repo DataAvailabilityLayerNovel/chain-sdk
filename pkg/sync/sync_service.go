@@ -165,7 +165,9 @@ func (syncService *SyncService[H]) WriteToStoreAndBroadcast(ctx context.Context,
 			return nil
 		}
 
-		syncService.logger.Error().Err(err).Msg("failed to broadcast")
+		// Most broadcast failures are duplicate gossip (peer already has the
+		// header/data via direct exchange). Log as warn — not fatal.
+		syncService.logger.Warn().Err(err).Msg("failed to broadcast")
 	}
 
 	return nil
@@ -380,10 +382,12 @@ func (syncService *SyncService[H]) initFromP2PWithRetry(ctx context.Context, pee
 	// block with exponential backoff until initialization succeeds, context is canceled, or timeout.
 	// If timeout is reached, we return nil to allow startup to continue - DA sync will
 	// provide headers and WriteToStoreAndBroadcast will lazily initialize the store/syncer.
+	// P2P direct exchange is much faster than DA fallback, so we wait generously
+	// here and keep the cap on backoff low so retries stay frequent.
 	backoff := 1 * time.Second
-	maxBackoff := 10 * time.Second
+	maxBackoff := 3 * time.Second
 
-	p2pInitTimeout := 30 * time.Second
+	p2pInitTimeout := 2 * time.Minute
 	timeoutTimer := time.NewTimer(p2pInitTimeout)
 	defer timeoutTimer.Stop()
 

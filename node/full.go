@@ -12,6 +12,7 @@ import (
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
@@ -77,6 +78,11 @@ func newFullNode(
 	logger zerolog.Logger,
 	nodeOpts NodeOptions,
 ) (fn *FullNode, err error) {
+	// Quiet the celestiaorg/go-header p2p library — it logs ERROR for benign
+	// startup races ("header/store: store is empty", "stream reset by remote")
+	// that resolve once the sequencer produces its first block.
+	_ = logging.SetLogLevel("header/p2p", "fatal")
+
 	logger.Debug().Hex("address", genesis.ProposerAddress).Msg("Proposer address")
 
 	blockMetrics, _ := metricsProvider(genesis.ChainID)
