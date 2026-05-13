@@ -122,6 +122,7 @@ func main() {
 		mux.HandleFunc("/metrics.json", metricsJSONHandler(cosmosExecutor, m))
 		mux.HandleFunc("/exec/height", execHeightHandler(cosmosExecutor))
 		mux.HandleFunc("/exec/rollback", execRollbackHandler(cosmosExecutor))
+		mux.HandleFunc("/auth/account/{address}", authAccountHandler(cosmosExecutor))
 		mux.HandleFunc("/exec/prune", execPruneHandler(cosmosExecutor))
 		mux.HandleFunc("/swagger", swaggerUIHandler())
 		mux.HandleFunc("/swagger.json", swaggerJSONHandler())
@@ -611,6 +612,26 @@ func blockByHeightHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, block)
+	}
+}
+
+func authAccountHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimSpace(r.PathValue("address"))
+		if addr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+			return
+		}
+		info, err := exec.GetAccountInfo(r.Context(), addr)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
 	}
 }
 

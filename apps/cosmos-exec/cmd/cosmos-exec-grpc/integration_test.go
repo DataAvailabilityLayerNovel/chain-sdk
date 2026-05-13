@@ -164,7 +164,10 @@ func buildTestTx(msgs ...sdk.Msg) ([]byte, error) {
 		return nil, err
 	}
 
-	authInfoBytes, err := proto.Marshal(&txv1beta1.AuthInfo{})
+	// Non-nil Fee — SDK 0.50's wrapper.initSignersAndMsgsV2 dereferences
+	// AuthInfo.Fee.Payer and would panic on a nil Fee. See txcodec.go for the
+	// same fix on the public tx builder.
+	authInfoBytes, err := proto.Marshal(&txv1beta1.AuthInfo{Fee: &txv1beta1.Fee{}})
 	if err != nil {
 		return nil, err
 	}

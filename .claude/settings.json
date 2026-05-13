@@ -53,7 +53,9 @@
       "Bash(find /Users/nguyennganha/go/pkg/mod/github.com/celestiaorg/celestia-openrpc* -name \"*.go\" 2>/dev/null | xargs grep -l \"NetworkHead\\\\|LocalHead\\\\|SyncState\" 2>/dev/null | head -5)",
       "Read(//Users/nguyennganha/go/pkg/mod/github.com/celestiaorg/**)",
       "Bash(find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia-openrpc*\" 2>/dev/null | head -5; find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia*\" 2>/dev/null | head -10)",
-      "Read(//Users/nguyennganha/go/pkg/mod/**)"
+      "Read(//Users/nguyennganha/go/pkg/mod/**)",
+      "Bash(unset COSMOS_EXEC_ENFORCE_SIGNATURES)",
+      "Bash(env)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -1,6 +1,7 @@
 package cosmoswasm
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -152,6 +153,85 @@ func BuildBatchRootTx(req BatchRootTxRequest) ([]byte, error) {
 		Sender:   req.Sender,
 		Contract: contract,
 		Msg:      map[string]any{"record_batch": inner},
+	})
+}
+
+// BuildSignedStoreTx is the signed counterpart of BuildStoreTx. It queries the
+// signer's on-chain account for account_number + sequence, then produces a
+// fully signed TxRaw. Use this when the cosmos-exec AnteHandler enforces
+// signatures (Level 2 hardening).
+func BuildSignedStoreTx(ctx context.Context, client *Client, signer *Signer, wasmByteCode []byte) ([]byte, error) {
+	if signer == nil {
+		return nil, errors.New("signer is required")
+	}
+	if len(wasmByteCode) == 0 {
+		return nil, errors.New("wasm bytecode cannot be empty")
+	}
+	in, err := signer.resolveSignerInput(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	return txcodec.BuildSignedProtoTxBytes(in, &wasmtypes.MsgStoreCode{
+		Sender:       signer.Address(),
+		WASMByteCode: wasmByteCode,
+	})
+}
+
+// BuildSignedInstantiateTx is the signed counterpart of BuildInstantiateTx.
+// req.Sender is ignored — the signer's derived address is used.
+func BuildSignedInstantiateTx(ctx context.Context, client *Client, signer *Signer, req InstantiateTxRequest) ([]byte, error) {
+	if signer == nil {
+		return nil, errors.New("signer is required")
+	}
+	if req.CodeID == 0 {
+		return nil, errors.New("code id is required")
+	}
+	msgJSON, err := txcodec.NormalizeJSONMsg(req.Msg)
+	if err != nil {
+		return nil, fmt.Errorf("invalid instantiate msg: %w", err)
+	}
+	label := strings.TrimSpace(req.Label)
+	if label == "" {
+		label = "wasm-via-sdk"
+	}
+	in, err := signer.resolveSignerInput(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	instantiate := &wasmtypes.MsgInstantiateContract{
+		Sender: signer.Address(),
+		CodeID: req.CodeID,
+		Label:  label,
+		Msg:    msgJSON,
+	}
+	if admin := strings.TrimSpace(req.Admin); admin != "" {
+		instantiate.Admin = admin
+	}
+	return txcodec.BuildSignedProtoTxBytes(in, instantiate)
+}
+
+// BuildSignedExecuteTx is the signed counterpart of BuildExecuteTx.
+// req.Sender is ignored — the signer's derived address is used.
+func BuildSignedExecuteTx(ctx context.Context, client *Client, signer *Signer, req ExecuteTxRequest) ([]byte, error) {
+	if signer == nil {
+		return nil, errors.New("signer is required")
+	}
+	contract := strings.TrimSpace(req.Contract)
+	if contract == "" {
+		return nil, errors.New("contract is required")
+	}
+	msgJSON, err := txcodec.NormalizeJSONMsg(req.Msg)
+	if err != nil {
+		return nil, fmt.Errorf("invalid execute msg: %w", err)
+	}
+	in, err := signer.resolveSignerInput(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	return txcodec.BuildSignedProtoTxBytes(in, &wasmtypes.MsgExecuteContract{
+		Sender:   signer.Address(),
+		Contract: contract,
+		Msg:      msgJSON,
 	})
 }
 

@@ -493,7 +493,9 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 		height = 1
 	}
 
-	queryCtx := e.app.BaseApp.NewContext(false).WithBlockHeight(int64(height)).WithBlockTime(time.Now())
+	// Use checkState (isCheckTx=true). SDK 0.50 nils finalizeBlockState after
+	// Commit, so NewContext(false) panics on queries that follow a block.
+	queryCtx := e.app.BaseApp.NewContext(true).WithBlockHeight(int64(height)).WithBlockTime(time.Now())
 
 	// Set a gas limit to prevent unbounded WASM queries from panicking with out-of-gas.
 	queryCtx = queryCtx.WithGasMeter(storetypes.NewGasMeter(e.queryGasMax))
@@ -504,6 +506,41 @@ func (e *CosmosExecutor) QuerySmart(ctx context.Context, contract string, queryM
 	}
 
 	return append([]byte(nil), queryResult...), nil
+}
+
+// AccountInfo is the minimal view of an on-chain account needed by clients to
+// sign txs: address + account number + sequence.
+type AccountInfo struct {
+	Address       string `json:"address"`
+	AccountNumber uint64 `json:"account_number"`
+	Sequence      uint64 `json:"sequence"`
+	Exists        bool   `json:"exists"`
+}
+
+// GetAccountInfo returns auth account state for the given bech32 address.
+// Returns Exists=false if no account exists yet (sequence/number = 0).
+func (e *CosmosExecutor) GetAccountInfo(ctx context.Context, bech32Addr string) (AccountInfo, error) {
+	addr, err := sdk.AccAddressFromBech32(strings.TrimSpace(bech32Addr))
+	if err != nil {
+		return AccountInfo{}, fmt.Errorf("invalid address: %w", err)
+	}
+
+	height := e.lastHeight
+	if height == 0 {
+		height = 1
+	}
+	queryCtx := e.app.BaseApp.NewContext(true).WithBlockHeight(int64(height))
+
+	acc := e.app.AccountKeeper.GetAccount(queryCtx, addr)
+	if acc == nil {
+		return AccountInfo{Address: bech32Addr, Exists: false}, nil
+	}
+	return AccountInfo{
+		Address:       bech32Addr,
+		AccountNumber: acc.GetAccountNumber(),
+		Sequence:      acc.GetSequence(),
+		Exists:        true,
+	}, nil
 }
 
 func (e *CosmosExecutor) SetFinal(ctx context.Context, blockHeight uint64) error {

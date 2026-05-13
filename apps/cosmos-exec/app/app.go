@@ -288,6 +288,18 @@ func New(logger log.Logger, database dbm.DB, chainID ...string) *App {
 	app.SetBeginBlocker(app.BeginBlocker)
 	app.SetEndBlocker(app.EndBlocker)
 
+	// AnteHandler: verify signatures + sequence + tx-size gas. Opt-in via
+	// COSMOS_EXEC_ENFORCE_SIGNATURES=true so existing tests and dev flows that
+	// submit unsigned txs keep working by default. Production / public-submit
+	// setups should set this env var. See app/ante.go.
+	if enforceSignaturesEnv() {
+		base.SetAnteHandler(NewPermissionlessAnteHandler(
+			app.AccountKeeper,
+			app.BankKeeper,
+			txConfig.SignModeHandler(),
+		))
+	}
+
 	if err := app.LoadLatestVersion(); err != nil {
 		panic(err)
 	}

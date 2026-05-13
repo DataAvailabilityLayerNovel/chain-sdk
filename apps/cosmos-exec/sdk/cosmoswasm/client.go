@@ -87,6 +87,29 @@ func (c *Client) SubmitTxBytes(ctx context.Context, txBytes []byte) (*SubmitTxRe
 	return c.SubmitTxBase64(ctx, base64.StdEncoding.EncodeToString(txBytes))
 }
 
+// AccountInfo mirrors the executor's auth account view.
+type AccountInfo struct {
+	Address       string `json:"address"`
+	AccountNumber uint64 `json:"account_number"`
+	Sequence      uint64 `json:"sequence"`
+	Exists        bool   `json:"exists"`
+}
+
+// FetchAccount queries the chain's auth state for the given bech32 address.
+// Used by signed tx builders to obtain the account_number + sequence required
+// to construct a SignDoc.
+func (c *Client) FetchAccount(ctx context.Context, bech32Address string) (*AccountInfo, error) {
+	bech32Address = strings.TrimSpace(bech32Address)
+	if bech32Address == "" {
+		return nil, errors.New("address is required")
+	}
+	res := AccountInfo{}
+	if err := c.doJSON(ctx, http.MethodGet, "/auth/account/"+bech32Address, nil, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (c *Client) GetTxResult(ctx context.Context, txHash string) (*GetTxResultResponse, error) {
 	txHash = strings.TrimSpace(txHash)
 	if txHash == "" {

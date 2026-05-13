@@ -69,7 +69,7 @@ Content-Type: application/json
 Methods: InitChain, GetTxs, ExecuteTxs, SetFinal, GetExecutionInfo, FilterTxs
 ```
 
-**File:** [`apps/cosmos-wasm/cmd/executor_client.go`](apps/cosmos-wasm/cmd/executor_client.go) — `connectCall()`
+**File:** [`apps/cosmos-wasm/cmd/executor_client.go`](../../../../cosmos-wasm/cmd/executor_client.go) — `connectCall()`
 
 ```go
 func (c *EnhancedExecutorClient) connectCall(ctx context.Context, method string, reqBody, respBody any) error {
@@ -88,7 +88,7 @@ POST /exec/rollback  {"target_height": N} → {"status": "ok"}
 POST /exec/prune     {"height": N}     → {"status": "ok"}
 ```
 
-**File:** [`apps/cosmos-exec/cmd/cosmos-exec-grpc/main.go`](apps/cosmos-exec/cmd/cosmos-exec-grpc/main.go)
+**File:** [`apps/cosmos-exec/cmd/cosmos-exec-grpc/main.go`](../../../cmd/cosmos-exec-grpc/main.go)
 
 ---
 

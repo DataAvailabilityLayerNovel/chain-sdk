@@ -22,7 +22,12 @@ Tài liệu giải thích chi tiết từng công nghệ, thuật toán, và pro
 14. [LevelDB — Key-Value Storage](#14-leveldb)
 15. [Gzip Compression — Data Optimization](#15-gzip-compression)
 16. [AES-256-GCM + Argon2id — Key Encryption](#16-aes-256-gcm--argon2id)
-17. [Bản đồ tương tác giữa các công nghệ](#17-bản-đồ-tương-tác)
+17. [Cosmos SDK Modules — auth, bank, wasm, IBC](#17-cosmos-sdk-modules)
+18. [CosmWasm (wasmd) — WASM Smart Contract Runtime](#18-cosmwasm-wasmd)
+19. [PersistStore — JSONL Append-Only Disk Layer](#19-persiststore-jsonl)
+20. [BoltDB — Raft Storage Backend](#20-boltdb)
+21. [Persistence end-to-end — Restart, Production Deployment, Multi-node Replication](#21-persistence-end-to-end)
+22. [Bản đồ tương tác giữa các công nghệ](#22-bản-đồ-tương-tác)
 
 ---
 
@@ -399,8 +404,20 @@ Version 3 (current):        Version 2 (old):
 **Tính chất:**
 - **AVL Balanced:** Self-balancing binary search tree → O(log N) lookup/insert/delete
 - **Merkle Hash:** Mỗi internal node hash = H(left_hash || right_hash). Root hash = state commitment
-- **Versioned:** Mỗi `Commit()` = 1 version. Có thể load bất kỳ version cũ nào
+- **Versioned:** Mỗi `Commit(root=H1, height=1)` = 1 version. Có thể load bất kỳ version cũ nào
 - **Immutable:** Versions cũ không bị modify — copy-on-write
+```
+Version 1 keys:
+  tree_1:H1 → {left: H2, right: H3}
+  tree_1:H2 → {left: a:1, right: b:2}
+  tree_1:H3 → {left: c:3, right: d:4}
+
+Version 2 keys:
+  tree_2:H1' → {left: H2, right: H3'}
+  tree_2:H2  → [SHARED] → tree_1:H2
+  tree_2:H3' → {left: c:30, right: d:4}
+  tree_2:c:30 → [SHARED] → value 30
+```
 
 **Tại sao không dùng Patricia Trie (Ethereum)?**
 - IAVL: O(log N) height, balanced → consistent performance
@@ -410,7 +427,7 @@ Version 3 (current):        Version 2 (old):
 
 ### Hệ thống sử dụng như thế nào
 
-**Package:** `github.com/cosmos/iavl v0.20.1` (indirect, qua Cosmos SDK v0.47)
+**Package:** `github.com/cosmos/iavl v1.2.2` (indirect, qua Cosmos SDK v0.50.11)
 
 **Cosmos SDK mount stores as IAVL:**
 ```go
@@ -667,7 +684,7 @@ ABCI là **protocol** giữa consensus engine và application logic trong Cosmos
 └──────────────────┘         └──────────────────┘
 ```
 
-**ABCI v1 (Cosmos SDK v0.47) — cosmos chain dùng:**
+**ABCI v1 (Cosmos SDK ≤ v0.47):**
 ```
 InitChain(genesis)           → khởi tạo state
 BeginBlock(header)           → chuẩn bị block
@@ -676,7 +693,7 @@ EndBlock(height)             → kết thúc block
 Commit()                     → persist state → AppHash
 ```
 
-**ABCI v2 (Cosmos SDK v0.50+) — ev-abci dùng:**
+**ABCI v2 (Cosmos SDK v0.50+) — cosmos-exec dùng:**
 ```
 InitChain(genesis)
 PrepareProposal(txs)        → app reorder/filter txs [MỚI]
@@ -693,26 +710,26 @@ Commit()
 // apps/cosmos-exec/executor/executor.go
 
 // InitChain
-e.app.InitChain(abci.RequestInitChain{
-    Time:            genesisTime,
-    ChainId:         chainID,
-    InitialHeight:   int64(initialHeight),
-    AppStateBytes:   e.app.DefaultGenesis(),
+e.app.InitChain(&abci.RequestInitChain{
+    Time:          genesisTime,
+    ChainId:       chainID,
+    InitialHeight: int64(initialHeight),
+    AppStateBytes: e.app.DefaultGenesis(),
 })
 
-// ExecuteTxs — ABCI v1 flow
-e.app.BeginBlock(abci.RequestBeginBlock{Header: header})
-for _, tx := range txs {
-    resp := e.app.DeliverTx(abci.RequestDeliverTx{Tx: tx})
-    // resp.Code: 0 = success, != 0 = fail
-    // resp.GasWanted, resp.GasUsed, resp.Events, resp.Log
-}
-e.app.EndBlock(abci.RequestEndBlock{Height: height})
-commitResp := e.app.Commit()
-stateRoot := commitResp.Data  // IAVL Merkle root = AppHash
+// ExecuteTxs — ABCI v2 flow (Cosmos SDK 0.50)
+finalizeResp, _ := e.app.FinalizeBlock(&abci.RequestFinalizeBlock{
+    Height: int64(height),
+    Time:   blockTime,
+    Hash:   blockHash,
+    Txs:    txs,
+})
+// finalizeResp.TxResults[i].Code, GasUsed, Events, Log
+_, _ = e.app.Commit()
+stateRoot := e.app.CommitMultiStore().LastCommitID().Hash  // IAVL Merkle root
 ```
 
-**Trong cosmos chain:** ABCI không chạy qua socket (in-process) — `e.app` là trực tiếp `baseapp.BaseApp` instance. Nhanh hơn socket ABCI.
+**Trong cosmos-exec:** ABCI không chạy qua socket (in-process) — `e.app` là trực tiếp `baseapp.BaseApp` instance. Nhanh hơn socket ABCI vì không serialize/copy qua TCP.
 
 ---
 
@@ -932,9 +949,61 @@ Read path:
 - Write-heavy workload phù hợp LSM tree
 - Battle-tested trong blockchain: Bitcoin Core, Ethereum (legacy)
 
+**Ví dụ**
+
+Giả sử lưu balance:
+
+```
+key: account/alice
+value: 100
+```
+Sau block tiếp theo:
+```
+key: account/alice
+value: 130
+```
+LevelDB không sửa bản cũ ngay theo kiểu in-place.
+Nó ghi version mới ra lớp mới hơn level++, rồi compaction sẽ dọn dần bản cũ.
+
+**Bloom Filter**
+
+Giả sử key alice tạo ra 3 vị trí bit:
+
+- 2
+- 7
+- 15
+
+Khi insert:
+
+- set bit 2, 7, 15 = 1
+
+Khi query alice:
+
+- nếu bit 7 = 0 → chắc chắn không có
+- nếu cả 3 bit đều = 1 → có thể có
+
 ### Hệ thống sử dụng như thế nào
 
-**Package:** `github.com/syndtr/goleveldb v1.0.1` (qua `cometbft-db v0.8.0`)
+**Luồng**
+
+```
+Query key
+   │
+   ├─> MemTable? 
+   │     ├─ có → trả kết quả
+   │     └─ không
+   │
+   ├─> Bloom filter của SSTable #1
+   │     ├─ "chắc chắn không có" → skip file
+   │     └─ "có thể có" → đọc file
+   │
+   ├─> Bloom filter của SSTable #2
+   │     └─ ...
+   │
+   └─> SSTable nào "có thể có" thì mới đọc
+```
+
+**Package:** `github.com/syndtr/goleveldb v1.0.1` (qua `cometbft-db v0.14.1` + `cosmos-db v1.1.1`)
 
 **2 LevelDB instances trong hệ thống:**
 
@@ -1070,65 +1139,603 @@ ciphertext := gcm.Seal(nonce, nonce, privKeyBytes, nil)
 
 ---
 
-## 17. Bản đồ tương tác giữa các công nghệ
+## 17. Cosmos SDK Modules
+
+### Nguyên lý
+
+**Cosmos SDK** ([cosmos-sdk v0.50.11](https://github.com/cosmos/cosmos-sdk)) là application framework cho blockchain. Mỗi "module" là một feature self-contained gồm:
+- **State (Store):** một IAVL tree riêng dưới một storage key
+- **Keeper:** struct cung cấp API đọc/ghi state — module khác chỉ truy cập state qua keeper interface (không trực tiếp)
+- **Msg handlers:** xử lý các transaction message (vd `MsgSend`, `MsgStoreCode`)
+- **Genesis init/export:** load/dump state ban đầu
+
+Pattern này gọi là **ObjectCapability**: keeper được pass qua dependency injection ở app constructor, module khác chỉ thấy interface tối thiểu cần thiết.
+
+```
+App (apps/cosmos-exec/app/app.go)
+ ├── auth        ──┐
+ ├── bank         ├── inject keepers tới các module khác
+ ├── capability  ──┤
+ ├── ibc          │
+ ├── transfer ────┘
+ └── wasm
+```
+
+### 4 module sử dụng trong cosmos-exec
+
+| Module | Store key | Vai trò | State chính |
+|--------|-----------|---------|-------------|
+| **auth** | `acc` | Account tracking (number, sequence, pubkey) | `BaseAccount` per address |
+| **bank** | `bank` | Token transfers + balance tracking | `coin balances`, `denom metadata`, supply |
+| **capability** | `cap` | Object capabilities (IBC ports, ownership) | Scoped sub-keepers |
+| **ibc** | `ibc` | Inter-Blockchain Communication protocol | Clients, connections, channels |
+| **transfer** (ICS-20) | `transfer` | Cross-chain fungible token transfers | Escrow accounts, denom traces |
+| **wasm** | `wasm` | CosmWasm contract storage (xem [Section 18](#18-cosmwasm-wasmd)) | Code blobs, contract state, history |
+
+### auth module — Account tracking
+
+**Code:** [`apps/cosmos-exec/app/app.go:176-184`](../../../app.go)
+
+```go
+app.AccountKeeper = authkeeper.NewAccountKeeper(
+    appCodec,
+    runtime.NewKVStoreService(keys[authtypes.StoreKey]),
+    authtypes.ProtoBaseAccount,        // account constructor
+    maccPerms,                          // module account permissions
+    authcodec.NewBech32Codec("cosmos"), // address encoding
+    "cosmos",                           // bech32 prefix
+    authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
+)
+```
+
+**Mục đích:** Mỗi tx ký phải đính kèm pubkey + sequence. AnteHandler ([app/ante.go](../../../ante.go)) gọi `AccountKeeper.GetAccount(ctx, addr)` để lấy account, verify signature, increment sequence.
+
+**State stored:**
+```
+acc/account/<addr_bytes>      → BaseAccount{number, sequence, pubkey}
+acc/global_account_number     → uint64 counter
+```
+
+### bank module — Balance tracking
+
+**Code:** [`apps/cosmos-exec/app/app.go:191-198`](../../../app.go)
+
+```go
+app.BankKeeper = bankkeeper.NewBaseKeeper(
+    appCodec,
+    runtime.NewKVStoreService(keys[banktypes.StoreKey]),
+    app.AccountKeeper,                  // delegate account ops
+    blockedAddrs,                       // module addrs can't receive
+    authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
+    logger,
+)
+```
+
+**State stored:**
+```
+bank/balances/<addr>/<denom>     → sdk.Coin (amount)
+bank/supply/<denom>              → total supply
+bank/denoms_metadata/<denom>     → display name, symbol, etc.
+```
+
+**Mục đích:** Lưu balances cho mọi address × denom. Dùng bởi `DeductFeeDecorator` (charge fee) và `MsgSend` (transfer). Hiện tại cosmos-exec không enforce fee → balance không thay đổi qua AnteHandler, nhưng nếu wasm contract gọi `BankKeeper.SendCoins` thì balance update.
+
+### IBC module — Cross-chain messaging
+
+**Code:** [`apps/cosmos-exec/app/app.go:202-213`](../../../app.go)
+
+```go
+app.IBCKeeper = ibckeeper.NewKeeper(
+    appCodec,
+    keys[ibcexported.StoreKey],
+    app.GetSubspace(ibcexported.ModuleName),
+    ibcStakingKeeper,    // staking adapter (cosmos-exec không có staking thật)
+    ibcUpgradeKeeper,    // upgrade adapter
+    app.ScopedIBCKeeper, // capability scope
+    authtypes.NewModuleAddress(authtypes.FeeCollectorName).String(),
+)
+```
+
+**IBC stack:**
+- **Tendermint Light Client** — verify counterparty chain block headers
+- **Connection** — handshake giữa 2 chains
+- **Channel** — packet stream over connection (per-application)
+- **Packet** — application-level message (vd ICS-20 token transfer)
+
+**State stored:** clients, connections, channels, packet commitments/receipts, next sequence numbers.
+
+**Trong cosmos-exec:** IBC infrastructure được wire đầy đủ nhưng **chưa hoạt động end-to-end** — cần relayer (vd Hermes) chạy giữa 2 chains. Hiện tại chủ yếu là proof-of-concept để chain có thể mở rộng sang multi-chain sau này.
+
+### transfer module (ICS-20)
+
+ICS-20 = chuẩn chuyển token cross-chain. Khi user gọi `MsgTransfer(amount, dst_chain)`:
+1. Token bị escrow tại source chain (gửi vào module account)
+2. Packet được commit vào IBC channel
+3. Relayer chuyển packet sang dest chain
+4. Dest chain mint voucher token (denom trace: `ibc/<hash>`)
+
+**Code:** [`apps/cosmos-exec/app/app.go:215-228`](../../../app.go) — `TransferKeeper` được wire qua IBC channel.
+
+### capability module — Object capabilities
+
+Mỗi IBC port (vd "transfer") cần một capability để claim. Pattern: app constructor gọi `CapabilityKeeper.ScopeToModule(name)` để tạo scoped keeper riêng cho từng module. Chỉ keeper sở hữu capability mới mở port được. Bảo vệ: module B không thể giả mạo packet xuất từ port của module A.
+
+```go
+// Seal: lock capability creation sau init
+app.ScopedIBCKeeper = app.CapabilityKeeper.ScopeToModule(ibcexported.ModuleName)
+app.ScopedTransferKeeper = app.CapabilityKeeper.ScopeToModule(ibctransfertypes.ModuleName)
+app.ScopedWasmKeeper = app.CapabilityKeeper.ScopeToModule(wasmtypes.ModuleName)
+app.CapabilityKeeper.Seal()
+```
+
+---
+
+## 18. CosmWasm (wasmd)
+
+### Nguyên lý
+
+**CosmWasm** ([wasmd v0.50.0](https://github.com/CosmWasm/wasmd)) là smart contract runtime cho Cosmos chains, dùng **WebAssembly** thay vì EVM bytecode. Contracts viết bằng **Rust** → compile sang Wasm bytecode → deploy lên chain.
+
+```
+Rust source (lib.rs)
+    │
+    ▼ rustc + cargo + wasm-pack
+Wasm bytecode (.wasm)
+    │
+    ▼ MsgStoreCode (đăng ký bytecode lên chain)
+Code ID = 1
+    │
+    ▼ MsgInstantiateContract (tạo instance từ code)
+Contract address (cosmos1abc...)
+    │
+    ▼ MsgExecuteContract (gọi handler)
+State update
+```
+
+**3 entrypoints chuẩn của contract:**
+- `instantiate(deps, env, info, msg)` — khởi tạo state ban đầu
+- `execute(deps, env, info, msg)` — handler cho mọi tx mutate state
+- `query(deps, env, msg)` — handler read-only (không tốn gas thật)
+
+**Wasm sandbox isolation:** Contract chạy trong VM, không truy cập filesystem/network. Truy cập state chỉ qua `deps.storage` (KV API) → state đảm bảo deterministic.
+
+**Gas metering:** Wasm VM count instructions → trừ gas. Hết gas → tx revert.
+
+### Tại sao chọn CosmWasm thay vì EVM?
+
+| | CosmWasm | EVM |
+|---|---|---|
+| Language | Rust (memory-safe, performant) | Solidity (chuyên dụng, hạn chế) |
+| Bytecode | Wasm (chuẩn industry) | EVM bytecode (custom) |
+| Performance | Native-near (Wasmer/Wasmtime JIT) | Interpreter-bound |
+| Ecosystem | Cosmos chains (Osmosis, Neutron, Juno) | Ethereum-compatible |
+| Storage model | Key-value API (Iavl) | Account + Storage trie |
+
+### Hệ thống sử dụng như thế nào
+
+**Code:** [`apps/cosmos-exec/app/app.go:236-256`](../../../app.go)
+
+```go
+app.WasmKeeper = wasmkeeper.NewKeeper(
+    appCodec,
+    runtime.NewKVStoreService(keys[wasmtypes.StoreKey]),
+    app.AccountKeeper,
+    app.BankKeeper,
+    nil, nil, nil, nil, nil, nil,        // staking/distribution/etc. — disabled
+    ibcRouterAdapter,
+    app.GRPCQueryRouter(),
+    wasmDir,                              // contract data dir on disk
+    wasmConfig,                           // gas limits, memory limits
+    capabilities,                         // available Wasm features
+    authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+    wasmOpts...,                          // optional plugins
+)
+```
+
+**State stored under `wasm/`:**
+```
+wasm/code/<id>                → Wasm bytecode + checksum + creator
+wasm/contract/<addr>          → ContractInfo (code_id, label, admin)
+wasm/contract/<addr>/state/   → contract's KV storage
+wasm/contract/<addr>/history  → migration history
+```
+
+**3 msg types:**
+
+| Msg | Action | Side effect |
+|-----|--------|-------------|
+| `MsgStoreCode` | Upload .wasm bytecode | Tạo code_id mới |
+| `MsgInstantiateContract` | Tạo instance từ code_id | Tạo contract address mới + chạy `instantiate()` |
+| `MsgExecuteContract` | Gọi `execute()` của contract | State updates + emit events |
+
+**Query path (read-only):**
+
+```go
+// executor.go:496-506
+queryCtx := e.app.BaseApp.NewContext(false).WithBlockHeight(...)
+queryCtx = queryCtx.WithGasMeter(storetypes.NewGasMeter(queryGasMax))
+result, _ := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
+```
+
+**Wasm runtime:** wasmd dùng **wasmvm** (CGO binding tới C++ Wasmer / Wasmtime). Compile contract một lần → cache native code → execute lần sau nhanh hơn.
+
+---
+
+## 19. PersistStore (JSONL)
+
+### Nguyên lý
+
+**PersistStore** ([apps/cosmos-exec/executor/persist.go](../../../executor/persist.go)) là layer persistence **bổ sung cho IAVL/LevelDB** — không thay thế. Nó lưu:
+
+- `metadata.json` — overwrite-on-update: chain ID, state root hex, last/finalized heights
+- `tx_results.jsonl` — append-only: kết quả execute từng tx (gas used, events, log)
+- `blocks.jsonl` — append-only: thông tin block (height, time, app hash, tx count)
+- `blobs.jsonl` — append-only: raw blob bytes (hex) submitted qua `/blob/submit`
+
+**JSONL (JSON Lines)** = một JSON object trên mỗi dòng. Dễ append O(1), dễ parse bằng `bufio.Scanner`, dễ inspect bằng `jq`:
+
+```jsonl
+{"type":"tx_result","data":{"hash":"abc...","height":1,"code":0,"gas_used":42000,...}}
+{"type":"tx_result","data":{"hash":"def...","height":2,"code":0,...}}
+{"type":"block","data":{"height":3,"time":"2026-05-12T10:00:00Z","app_hash":"..."}}
+```
+
+### Tại sao cần PersistStore khi đã có IAVL/LevelDB?
+
+| Câu hỏi | IAVL/LevelDB | PersistStore |
+|---------|--------------|--------------|
+| State commitment (Merkle root) | ✅ | ❌ |
+| Verify proof | ✅ | ❌ |
+| Versioned rollback | ✅ | ❌ |
+| Inspect tx result theo hash | ❌ (chỉ có state mới) | ✅ |
+| Replay blob data | ❌ | ✅ |
+| Debug bằng `jq`/`grep` | ❌ (binary format) | ✅ (plain text) |
+
+**IAVL chỉ giữ trạng thái HIỆN TẠI** — không lưu lịch sử event/log của từng tx. Cosmos SDK 0.50 không tự persist tx response indices. PersistStore là layer "audit log" giúp:
+- Tra cứu tx result by hash sau khi chain restart (RPC `/tx/{hash}`)
+- Replay blob data (RPC `/blob/retrieve`)
+- Migrate sang DB khác (vd PostgreSQL indexer) bằng cách stream JSONL
+
+### Hệ thống sử dụng như thế nào
+
+**Startup replay:** [persist.go:NewPersistStore](../../../executor/persist.go)
+```go
+// Mỗi .jsonl file được mở O_RDWR + scan từ đầu vào memory map
+txFile, _ := os.OpenFile(dir+"/tx_results.jsonl", O_CREATE|O_APPEND|O_RDWR, 0o644)
+scanner := bufio.NewScanner(txFile)
+for scanner.Scan() {
+    var entry persistedTxResult
+    json.Unmarshal(scanner.Bytes(), &entry)
+    cache[entry.Data.Hash] = entry.Data
+}
+```
+
+**Append on update:** mỗi tx result/block/blob được encode thành JSON + append 1 dòng → fsync (tuỳ config). Concurrent writes được protect bằng `sync.Mutex`.
+
+**Crash safety:** Append-only + `O_APPEND` → atomic write per line (POSIX guarantee với write < PIPE_BUF). Crash trong khi đang ghi → file vẫn parse được tới dòng cuối nguyên vẹn.
+
+**Config:**
+- `--in-memory` flag → bypass PersistStore (test mode, fastest)
+- `cfg.PersistBlobs` / `cfg.PersistTxResults` → toggle từng loại
+- `cfg.ResolveDataDir()` → directory chứa các file
+
+---
+
+## 20. BoltDB
+
+### Nguyên lý
+
+**BoltDB** là **embedded key-value store** dùng **B+ tree** trên một file mmap-ed. Khác với LSM (LevelDB), BoltDB tối ưu cho **read-heavy** workload và **transactional ACID** trong một file.
+
+```
+write tx:
+  begin → mutate in-memory copy → fsync metadata → commit
+
+read tx:
+  begin → MVCC snapshot → read consistent view → no blocking writers
+```
+
+- **Single-writer, multi-reader:** writes serialize, reads parallel
+- **Crash safe:** copy-on-write B+ tree + fsync → power-loss safe
+- **Zero-copy:** mmap → reads không cần allocate buffer
+- **No compaction:** trees rebalance in-place
+
+### Tại sao BoltDB cho Raft, không LevelDB?
+
+Raft cần một storage backend cho **2 loại data**:
+1. **Log entries** — append-only, ít delete (chỉ truncate khi snapshot)
+2. **Stable state** — current term, last voted candidate (overwrite vài bytes)
+
+BoltDB phù hợp vì:
+- **ACID transactions** đảm bảo log + stable state commit atomic — Raft safety phụ thuộc vào đây
+- **Single-file** — easy backup, no compaction artifacts
+- **HashiCorp official adapter** (`raft-boltdb`) — production-tested trong Consul/Nomad/Vault
+
+LevelDB không phù hợp vì: writes async (memtable flush sau), không ACID across multiple keys.
+
+### Hệ thống sử dụng như thế nào
+
+**Package:** `github.com/hashicorp/raft-boltdb` (wraps [`go.etcd.io/bbolt`](https://github.com/etcd-io/bbolt))
+
+**2 files mỗi Raft node:**
+
+| File | Mục đích | Truy cập |
+|------|---------|---------|
+| `raft-log.db` | Log entries (proto-encoded block states) | Append on commit, read on replay |
+| `raft-stable.db` | Current term + last voted peer | Overwrite mỗi election |
+
+**Code:** [`pkg/raft/node.go`](../../../../../../pkg/raft/node.go)
+```go
+logStore, _ := raftboltdb.NewBoltStore(filepath.Join(dataDir, "raft-log.db"))
+stableStore, _ := raftboltdb.NewBoltStore(filepath.Join(dataDir, "raft-stable.db"))
+
+r, _ := raft.NewRaft(raftCfg, fsm, logStore, stableStore, snapshotStore, transport)
+```
+
+**Khi nào active:** Chỉ khi `nodeConfig.Raft.Enable = true` (multi-sequencer HA mode). Single-sequencer node không tạo BoltDB files.
+
+---
+
+## 21. Persistence end-to-end
+
+Phần này trả lời các câu hỏi thực tế khi vận hành chain:
+
+- Tại sao stop chain rồi restart, state vẫn còn đầy đủ?
+- Production thì data lưu ở đâu? Trên cloud thì *ai* lưu?
+- Các node lấy data như thế nào? Liên quan gì đến gossip?
+
+### 21.1. Tại sao restart vẫn còn data
+
+Khi node dừng và bật lại, **không có bước restore manual nào** — startup đơn giản là **đọc lại các file local trên disk**. Có **4 storage layer** persist độc lập, mỗi cái phục vụ một mục đích:
+
+```
+Khi node chạy (write path)            Khi restart (read path)
+─────────────────────────────         ─────────────────────────────
+Block produced                        node bật lên
+  │                                    │
+  ├─▶ ev-node Store (LevelDB)         ├─◀ Store.LoadHeader/LoadData()
+  │   block headers + data            │     (block/internal/cache restore)
+  │                                    │
+  ├─▶ Cosmos SDK BaseApp              ├─◀ baseapp.LoadLatestVersion()
+  │   IAVL trees → LevelDB            │     (load latest committed IAVL)
+  │                                    │
+  ├─▶ PersistStore (JSONL)            ├─◀ NewPersistStore() scan files
+  │   tx results, blob data           │     vào memory map
+  │                                    │
+  └─▶ Raft (BoltDB, nếu enable)       └─◀ raft-boltdb open files
+      log + stable state                    + replay log → FSM
+```
+
+**Khoá quan sát:** không layer nào dùng RAM-only. Mọi `Commit` đều `fsync` xuống disk **trước khi** trả response thành công. Crash giữa chừng → mất block đang sản xuất nhưng **không bao giờ mất block đã commit**.
+
+**Restore từ disk** ở [`block/internal/syncing/syncer.go:311 initializeState`](../../../../../../block/internal/syncing/syncer.go):
+```go
+state := s.store.GetState(ctx)            // load từ LevelDB
+s.lastState.Store(&state)                  // restore memory
+s.daRetrieverHeight.Store(max(            // tiếp tục từ DA height đã catch-up
+    genesis.DAStartHeight,
+    s.cache.DaHeight(),
+    state.DAHeight,
+))
+```
+
+Cosmos-exec làm tương tự: `baseapp.LoadLatestVersion()` mở IAVL trees ra phiên bản committed cuối → state root khớp với `metadata.json.state_root` trong PersistStore. Mismatch → executor sẽ panic và yêu cầu rollback.
+
+### 21.2. Data sống ở đâu trên disk
+
+Trong dev (mặc định) — mọi file trong **home dir** của node:
+
+```
+~/.evcosmos-sequencer/          (hoặc đường dẫn --home)
+├── config/
+│   ├── genesis.json            ← chain ID, initial height, DA start height
+│   ├── evnode.yml              ← runtime config (block_time, namespaces, ...)
+│   └── signer.json             ← AES-256-GCM encrypted Ed25519 key (Section 16)
+└── data/
+    ├── cosmos-wasm/            ← ev-node Store (LevelDB)
+    │   ├── 000003.ldb          ← block headers, data, DA inclusion cache
+    │   └── MANIFEST-*          ← LSM tree metadata
+    ├── raft-log.db             ← Raft entries (chỉ khi HA mode, Section 20)
+    └── raft-stable.db          ← Raft term/vote
+
+~/.cosmos-exec-sequencer/
+└── data/
+    ├── application.db/          ← Cosmos SDK IAVL trees (LevelDB, Section 14)
+    │                              auth, bank, wasm, ibc, ... state
+    ├── metadata.json            ← PersistStore: chainID, stateRoot, heights (Section 19)
+    ├── tx_results.jsonl         ← append-only tx results
+    ├── blocks.jsonl             ← append-only block info
+    └── blobs.jsonl              ← append-only blob data
+```
+
+**Phân chia trách nhiệm:**
+- `application.db/` là **nguồn truth** cho state — IAVL Merkle root được commit on-chain.
+- `cosmos-wasm/` (ev-node Store) là **nguồn truth** cho block history — header + data đầy đủ để rebroadcast cho peer mới.
+- `*.jsonl` là **audit log** — không tham gia consensus, dùng để debug + serve RPC `/tx/{hash}`.
+
+### 21.3. Production deployment
+
+Câu hỏi quan trọng: "production thì lưu ở đâu?". Câu trả lời ngắn — **vẫn LevelDB trên disk local** của từng node, **không phải cloud database**. Vì:
+
+- Mỗi node là một **state machine độc lập** — phải có copy state đầy đủ để compute Merkle root deterministic.
+- Đặt LevelDB trên S3/RDS → mỗi tx phải round-trip ra mạng → latency huỷ throughput.
+- Blockchain *đã có* replication built-in: P2P + DA layer. Không cần thêm replication tầng database.
+
+**Pattern production thực tế:**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Sequencer node (1 con, hoặc N con HA với Raft)             │
+│  • Block-volume SSD (vd EBS gp3, Hetzner NVMe)             │
+│  • /var/lib/evcosmos/data/  ← LevelDB + IAVL               │
+│  • Snapshot định kỳ → S3/GCS/Backblaze (cold backup)       │
+│  • Encrypted key trong KMS/Vault thay vì signer.json       │
+└────────────────────────────────────────────────────────────┘
+                          │ DA submit (header + data namespaces)
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│ Celestia Mainnet/Mocha (DA Layer)                          │
+│  • Operator của Celestia network giữ blob data             │
+│  • Light nodes có thể sample availability                  │
+│  • 30-day retention (Mainnet) / configurable               │
+└────────────────────────────────────────────────────────────┘
+                          │ P2P broadcast (GossipSub)
+                          │ + DA fetch fallback
+                          ▼
+┌────────────────────────────────────────────────────────────┐
+│ Full nodes (N con, geo-distributed)                        │
+│  • Same disk layout như sequencer                          │
+│  • Read-only mode (`COSMOS_EXEC_READ_ONLY=true`) để        │
+│    block public tx submission                              │
+│  • Đặt sau load balancer + rate limit (Section đã làm)     │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Best practices production:**
+
+| Vấn đề | Giải pháp |
+|--------|-----------|
+| Disk full vì IAVL grow vô hạn | Bật pruning (`PruningOptions` của Cosmos SDK) — giữ N versions gần nhất |
+| Mất disk → mất chain | Snapshot LevelDB + IAVL ra S3 mỗi N blocks (vd `cosmprund` hoặc rsync) |
+| Sequencer key rò rỉ | Thay `signer.json` bằng remote signer (HashiCorp Vault, AWS KMS) |
+| Full node mới join | Cấu hình `DAStartHeight` trong genesis = DA height tại lúc launch → node mới sync từ đó qua DA + P2P |
+| Cần state lịch sử (archive node) | Tắt pruning hoàn toàn, dùng disk lớn — query historical state qua RPC |
+
+### 21.4. Cloud — Ai *thực sự* giữ data
+
+Đây là điểm khác biệt giữa **sovereign rollup** và **L1 truyền thống**. Có 3 "cloud" trong stack:
+
+| Layer | Ai lưu | Mất layer này thì... |
+|-------|--------|---------------------|
+| **Execution state** (IAVL/LevelDB) | Operator của từng node (bạn) — local SSD | Có thể rebuild từ DA blobs + replay |
+| **Block history** (headers + data) | Mọi node trong P2P network | Recover từ DA layer hoặc peer |
+| **DA blobs** (Celestia) | Validator set của Celestia network | **Mất vĩnh viễn** nếu Celestia mất quorum |
+
+**Hệ quả:** state của rollup được **secure bởi Celestia validators**, không phải bạn. Đây là kiến trúc "data availability outsourcing":
+
+- Bạn chỉ cần một sequencer (single point of failure được chấp nhận, vì user vẫn force-include qua DA).
+- Block history luôn recoverable từ Celestia → kể cả khi *tất cả full node* down, vẫn có thể bootstrap node mới từ DA.
+- Tradeoff: phải trả Celestia phí PayForBlobs.
+
+**Lưu vào "cloud bình thường" (S3, Cloudflare R2) thì sao?** Có thể, nhưng là **backup**, không phải canonical source:
+- S3 không có liveness/availability guarantee xuyên-trust-zone (Amazon có thể delete).
+- Không có Merkle proof — không verify được "data này thật sự là block 1000".
+- Celestia + NMT proofs ([Section 8](#8-namespaced-merkle-tree)) cung cấp inclusion proof cryptographic → trust-minimized.
+
+### 21.5. Node mới sync data thế nào (vai trò của Gossip)
+
+Khi một **full node mới** bật lên với genesis nhưng chưa có block:
+
+```
+node start
+  │
+  ├─▶ libp2p connect bootstrap peers (Section 4: Kademlia DHT)
+  │   → discover các peer cùng chainID
+  │
+  ├─▶ Subscribe GossipSub topics (Section 3)
+  │   → header topic, data topic
+  │   → từ giờ NEW blocks sẽ push qua mesh
+  │
+  ├─▶ go-header initFromP2PWithRetry (Section 5)
+  │   → fetch height=1 (genesis) từ peer
+  │   → fetch tới network head qua Exchange
+  │
+  └─▶ DAFollower (Section 9: Celestia)
+      → subscribe DA namespace cho new submissions
+      → catchup từ DAStartHeight tới DA head
+```
+
+**Hai cơ chế chạy song song:**
+
+| Cơ chế | Khi nào nhanh | Khi nào chậm |
+|--------|---------------|--------------|
+| **P2P direct exchange + gossip** | Có peer khoẻ trong cùng region | Mạng phân mảnh, peer xa |
+| **DA fetch** | Always available (Celestia luôn up) | Round-trip qua Celestia bridge (~200-500ms/height) |
+
+**Liên hệ với gossip cụ thể:**
+
+- **GossipSub chỉ giúp NEW blocks** — mesh push từ sequencer ra mọi node trong vài trăm ms. Không giúp node mới catch-up history.
+- **Catch-up dùng go-header Exchange** ([Section 5](#5-go-header)) — request/response P2P để fetch range `[height_local+1, network_head]` từ peer có store đầy đủ.
+- **Fallback DA** — nếu P2P fail (no peer hoặc rate-limited), `DAFollower` đọc blob từ Celestia. Đây là **trust-minimized path**: data đã có Merkle proof từ Celestia, full node verify được mà không cần tin peer P2P.
+
+**Câu trả lời cho "node mới đứng dậy lúc 4 giờ sáng":**
+1. Genesis có `DAStartHeight=N` → node biết bỏ qua heights 1..N-1 trên Celestia.
+2. Connect peer → fetch genesis header → verify signature của sequencer ([Section 13: Ed25519](#13-ed25519)).
+3. Nếu peer có đầy đủ history → sync nhanh qua P2P (vài chục MB/s LAN).
+4. Nếu peer mới hoặc thiếu → fallback DA, đọc tuần tự blob → chậm hơn nhưng đảm bảo.
+5. Sau khi đuổi kịp → subscribe gossip cho block tương lai.
+
+**Trường hợp đặc biệt: tất cả full node bị mất**
+- Sequencer vẫn submit lên Celestia → data còn nguyên trên DA.
+- Boot 1 node mới với genesis + `DAStartHeight` đúng → DAFollower replay toàn bộ history.
+- Khôi phục đầy đủ → state root sau khi replay phải khớp commitment trên Celestia.
+- Đây là điều phân biệt **sovereign rollup** với app blockchain truyền thống: chain không *biến mất* khi tất cả node down, vì DA là source of truth.
+
+### 21.6. Tóm tắt 1 dòng
+
+> **Restart không cần restore** vì mọi committed state đã `fsync` xuống LevelDB/IAVL/BoltDB/JSONL trên disk local. **Production lưu trên SSD local của từng node**, không phải cloud DB — replication tới các node khác đi qua **GossipSub (new blocks) + go-header Exchange (catch-up) + Celestia DA (canonical fallback)**.
+
+---
+
+## 22. Bản đồ tương tác giữa các công nghệ
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Full Node (node/full.go)                     │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐    │
-│  │ Raft (hashicorp/raft)                                        │    │
-│  │   BoltDB storage ← log entries (protobuf-encoded blocks)     │    │
-│  │   Leader election → leader runs block production              │    │
-│  │                   → follower runs sync                        │    │
-│  └──────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-│  ┌────────────────────────┐    ┌─────────────────────────────────┐   │
-│  │ libp2p                 │    │ go-header                       │   │
-│  │  ├─ Ed25519 identity   │    │  ├─ Exchange (fetch by height)  │   │
-│  │  ├─ Kademlia DHT       │    │  ├─ Subscriber (GossipSub)     │   │
-│  │  │   └─ peer discovery │    │  └─ Syncer (catch up)           │   │
-│  │  ├─ GossipSub          │    │     2 instances:                │   │
-│  │  │   ├─ header topic   │◄──►│     HeaderSyncService           │   │
-│  │  │   └─ data topic     │    │     DataSyncService             │   │
-│  │  └─ Connection gating  │    └─────────────────────────────────┘   │
-│  └────────────────────────┘                                          │
-│                                                                      │
-│  ┌────────────────────────┐    ┌─────────────────────────────────┐   │
-│  │ Celestia DA Client     │    │ Connect-RPC Server              │   │
-│  │  ├─ JSON-RPC → node   │    │  ├─ ExecutorService (protobuf)  │   │
-│  │  ├─ 3 namespaces      │    │  ├─ StoreService                │   │
-│  │  │   (SHA-256 derived) │    │  ├─ P2PService                  │   │
-│  │  ├─ NMT proofs         │    │  ├─ h2c (HTTP/2 cleartext)     │   │
-│  │  └─ Blob submit/get   │    │  └─ gzip compression (≥1KB)     │   │
-│  └────────────────────────┘    └─────────────────────────────────┘   │
-│                                                                      │
-│  ┌────────────────────────┐    ┌─────────────────────────────────┐   │
-│  │ Block Store            │    │ Signer                          │   │
-│  │  └─ LevelDB            │    │  ├─ Ed25519 key pair            │   │
-│  │     (headers + data)   │    │  ├─ AES-256-GCM encryption      │   │
-│  └────────────────────────┘    │  └─ Argon2id key derivation     │   │
-│                                └─────────────────────────────────┘   │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐    │
-│  │ Execution Layer (pluggable)                                   │    │
-│  │                                                               │    │
-│  │  ┌──────────────────────────────────────────────────────┐    │    │
-│  │  │ CosmosExecutor (apps/cosmos-exec/)                    │    │    │
-│  │  │  ├─ ABCI v1 (BeginBlock/DeliverTx/EndBlock/Commit)   │    │    │
-│  │  │  ├─ Cosmos SDK BaseApp                                │    │    │
-│  │  │  │   ├─ auth, bank, wasm, IBC modules                │    │    │
-│  │  │  │   └─ IAVL trees → LevelDB                         │    │    │
-│  │  │  ├─ CosmWasm (wasmd) — WASM smart contract runtime   │    │    │
-│  │  │  ├─ BlobStore (SHA-256 content addressing)            │    │    │
-│  │  │  │   └─ Merkle tree (batch proofs)                    │    │    │
-│  │  │  ├─ PersistStore (JSONL → disk)                       │    │    │
-│  │  │  └─ HTTP API + Security middleware                    │    │    │
-│  │  │      ├─ Auth (Bearer token)                           │    │    │
-│  │  │      ├─ Rate limiting                                 │    │    │
-│  │  │      └─ Gzip compression (blob optimization)          │    │    │
-│  │  └──────────────────────────────────────────────────────┘    │    │
-│  └──────────────────────────────────────────────────────────────┘    │
+│                         Full Node (node/full.go)                    │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ Raft (hashicorp/raft)                                        │   │
+│  │   BoltDB storage ← log entries (protobuf-encoded blocks)     │   │
+│  │   Leader election → leader runs block production             │   │
+│  │                   → follower runs sync                       │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  ┌────────────────────────┐    ┌─────────────────────────────────┐  │
+│  │ libp2p                 │    │ go-header                       │  │
+│  │  ├─ Ed25519 identity   │    │  ├─ Exchange (fetch by height)  │  │
+│  │  ├─ Kademlia DHT       │    │  ├─ Subscriber (GossipSub)      │  │
+│  │  │   └─ peer discovery │    │  └─ Syncer (catch up)           │  │
+│  │  ├─ GossipSub          │    │     2 instances:                │  │
+│  │  │   ├─ header topic   │◄──►│     HeaderSyncService           │  │
+│  │  │   └─ data topic     │    │     DataSyncService             │  │
+│  │  └─ Connection gating  │    └─────────────────────────────────┘  │
+│  └────────────────────────┘                                         │
+│                                                                     │
+│  ┌────────────────────────┐    ┌─────────────────────────────────┐  │
+│  │ Celestia DA Client     │    │ Connect-RPC Server              │  │
+│  │  ├─ JSON-RPC → node    │    │  ├─ ExecutorService (protobuf)  │  │
+│  │  ├─ 3 namespaces       │    │  ├─ StoreService                │  │
+│  │  │   (SHA-256 derived) │    │  ├─ P2PService                  │  │
+│  │  ├─ NMT proofs         │    │  ├─ h2c (HTTP/2 cleartext)      │  │
+│  │  └─ Blob submit/get    │    │  └─ gzip compression (≥1KB)     │  │
+│  └────────────────────────┘    └─────────────────────────────────┘  │
+│                                                                     │
+│  ┌────────────────────────┐    ┌─────────────────────────────────┐  │
+│  │ Block Store            │    │ Signer                          │  │
+│  │  └─ LevelDB            │    │  ├─ Ed25519 key pair            │  │
+│  │     (headers + data)   │    │  ├─ AES-256-GCM encryption      │  │
+│  └────────────────────────┘    │  └─ Argon2id key derivation     │  │
+│                                └─────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │ Execution Layer (pluggable)                                  │   │
+│  │                                                              │   │
+│  │  ┌──────────────────────────────────────────────────────┐    │   │
+│  │  │ CosmosExecutor (apps/cosmos-exec/)                   │    │   │
+│  │  │  ├─ ABCI v1 (BeginBlock/DeliverTx/EndBlock/Commit)   │    │   │
+│  │  │  ├─ Cosmos SDK BaseApp                               │    │   │
+│  │  │  │   ├─ auth, bank, wasm, IBC modules                │    │   │
+│  │  │  │   └─ IAVL trees → LevelDB                         │    │   │
+│  │  │  ├─ CosmWasm (wasmd) — WASM smart contract runtime   │    │   │
+│  │  │  ├─ BlobStore (SHA-256 content addressing)           │    │   │
+│  │  │  │   └─ Merkle tree (batch proofs)                   │    │   │
+│  │  │  ├─ PersistStore (JSONL → disk)                      │    │   │
+│  │  │  └─ HTTP API + Security middleware                   │    │   │
+│  │  │      ├─ Auth (Bearer token)                          │    │   │
+│  │  │      ├─ Rate limiting                                │    │   │
+│  │  │      └─ Gzip compression (blob optimization)         │    │   │
+│  │  └──────────────────────────────────────────────────────┘    │   │
+│  └──────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1141,7 +1748,7 @@ ciphertext := gcm.Seal(nonce, nonce, privKeyBytes, nil)
 | 3 | **GossipSub** | `go-libp2p-pubsub v0.15.0` | Block header/data broadcast (pub/sub) |
 | 4 | **Kademlia DHT** | `go-libp2p-kad-dht v0.38.0` | Peer discovery (tìm nodes cùng chain) |
 | 5 | **go-header** | `celestiaorg/go-header v0.8.1` | Header exchange, sync catch-up |
-| 6 | **IAVL Tree** | `cosmos/iavl v0.20.1` | Versioned Merkle state tree (rollback support) |
+| 6 | **IAVL Tree** | `cosmos/iavl v1.2.2` | Versioned Merkle state tree (rollback support) |
 | 7 | **SHA-256 Merkle** | Pure Go (tự implement) | Blob batch proofs (commit + verify) |
 | 8 | **NMT** | `celestiaorg/nmt v0.24.2` | Celestia data availability proofs |
 | 9 | **Celestia** | `celestiaorg/go-square v3.0.2` | Data availability layer (blob storage + proofs) |
@@ -1153,6 +1760,8 @@ ciphertext := gcm.Seal(nonce, nonce, privKeyBytes, nil)
 | 15 | **Gzip** | Go stdlib `compress/gzip` | Blob data compression (reduce DA cost) |
 | 16 | **AES-256-GCM** | Go stdlib `crypto/aes` | Private key encryption at rest |
 | 17 | **Argon2id** | `golang.org/x/crypto/argon2` | Password → key derivation (memory-hard) |
-| 18 | **CosmWasm/wasmd** | `CosmWasm/wasmd v0.45.0` | WASM smart contract runtime |
-| 19 | **Cosmos SDK** | `cosmos-sdk v0.47.15` | Blockchain application framework (modules, keepers) |
-| 20 | **BoltDB** | `hashicorp/raft-boltdb` | Raft log + stable storage |
+| 18 | **CosmWasm/wasmd** | `CosmWasm/wasmd v0.50.0` | WASM smart contract runtime |
+| 19 | **Cosmos SDK** | `cosmos-sdk v0.50.11` | Blockchain application framework (modules, keepers) |
+| 20 | **SDK modules** | auth, bank, capability, ibc, transfer, wasm | Per-module state + msg handlers (xem [Section 17](#17-cosmos-sdk-modules)) |
+| 21 | **PersistStore (JSONL)** | Pure Go (tự implement) | Audit log: tx results, blocks, blobs trên disk (xem [Section 19](#19-persiststore-jsonl)) |
+| 22 | **BoltDB** | `hashicorp/raft-boltdb` (qua `bbolt`) | Raft log + stable storage (B+ tree, ACID, single-file) |
