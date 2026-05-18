@@ -123,6 +123,19 @@ func swaggerSpec() map[string]any {
 					},
 				},
 			},
+			"/tx/estimate": map[string]any{
+				"post": map[string]any{
+					"tags":        []string{"tx"},
+					"summary":     "Simulate per-tx cost (TIA + gas)",
+					"description": "Returns what the tx *would* cost given current pricing policy, without charging anything. Accepts one of {tx_base64|tx_hex} + gas hint, {hash} of an executed tx, or raw {bytes, gas}.",
+					"requestBody": reqBody("application/json", ref("EstimateTxRequest")),
+					"responses": map[string]any{
+						"200": resp("Cost breakdown", ref("TxCostBreakdown")),
+						"400": resp("Invalid request", ref("ErrorResponse")),
+						"404": resp("Hash not found", ref("ErrorResponse")),
+					},
+				},
+			},
 
 			// ── WASM ────────────────────────────────────────────────
 			"/wasm/query-smart": map[string]any{
@@ -228,9 +241,16 @@ func schemas() map[string]any {
 				prop("height", "integer", "Block height (present when found)"),
 				prop("code", "integer", "Result code, 0 = success (present when found)"),
 				prop("log", "string", "Execution log (present when found)"),
+				prop("gas_used", "integer", "Gas consumed by the tx"),
+				prop("gas_wanted", "integer", "Gas requested by the tx"),
+				prop("bytes", "integer", "On-wire size of the encoded tx"),
 				map[string]any{"events": map[string]any{
 					"type": "array", "description": "Execution events (present when found)",
 					"items": map[string]any{"type": "object"},
+				}},
+				map[string]any{"cost": map[string]any{
+					"$ref":        "#/components/schemas/TxCostBreakdown",
+					"description": "Simulated cost using current pricing policy",
 				}},
 			),
 		},
@@ -255,14 +275,38 @@ func schemas() map[string]any {
 						prop("height", "integer", "Block height"),
 						prop("code", "integer", "Result code (0 = success)"),
 						prop("log", "string", "Execution log"),
+						prop("gas_used", "integer", "Gas consumed by the tx"),
+						prop("gas_wanted", "integer", "Gas requested by the tx"),
+						prop("bytes", "integer", "On-wire size of the encoded tx"),
 						map[string]any{"events": map[string]any{
 							"type": "array", "description": "Execution events",
 							"items": map[string]any{"type": "object"},
 						}},
 					),
 				},
+				"cost": map[string]any{
+					"$ref":        "#/components/schemas/TxCostBreakdown",
+					"description": "Simulated cost using current pricing policy (present when found)",
+				},
 			},
 		},
+		"EstimateTxRequest": obj(
+			prop("tx_base64", "string", "Signed tx bytes (base64)"),
+			prop("tx_hex", "string", "Signed tx bytes (hex) — alternative to tx_base64"),
+			prop("hash", "string", "Hash of an already-executed tx (looks up stored bytes/gas)"),
+			prop("bytes", "integer", "Raw byte count when neither tx nor hash is supplied"),
+			prop("gas", "integer", "Gas to price against (required with tx_base64/tx_hex/bytes; ignored for hash)"),
+		),
+		"TxCostBreakdown": obj(
+			prop("bytes", "integer", "Tx byte count used for the DA cost"),
+			prop("gas", "integer", "Gas units used for the execution cost"),
+			prop("est_da_amount", "string", "Estimated DA cost as a fractional decimal (e.g. \"0.000123\")"),
+			prop("est_da_denom", "string", "Denomination of est_da_amount (default: TIA)"),
+			prop("est_gas_amount", "string", "Estimated gas cost as a fractional decimal"),
+			prop("est_gas_denom", "string", "Denomination of est_gas_amount (default: ustake)"),
+			prop("da_price_per_byte", "string", "Policy constant: TIA per byte"),
+			prop("min_gas_price", "string", "Policy constant: gas-denom per gas unit"),
+		),
 
 		// ── WASM ────────────────────────────────────────────────
 		"QuerySmartRequest": obj(

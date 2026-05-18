@@ -177,7 +177,7 @@ iterator, staking, stargate, cosmwasm_1_1, cosmwasm_1_2, cosmwasm_1_3, cosmwasm_
 ```
 1. InitChain(genesis)     → khởi tạo state cho tất cả modules
 2. BeginBlock(header)     → modules chuẩn bị cho block mới
-3. DeliverTx(tx_bytes)    → decode protobuf → route tới WasmKeeper
+3. DeliverTx(tx_bytes)    → ante chain → decode protobuf → route tới WasmKeeper
    ├─ MsgStoreCode        → lưu .wasm bytecode, trả code_id
    ├─ MsgInstantiateContract → tạo contract instance, trả contract_address
    ├─ MsgExecuteContract  → gọi contract method, thay đổi state
@@ -185,6 +185,21 @@ iterator, staking, stargate, cosmwasm_1_1, cosmwasm_1_2, cosmwasm_1_3, cosmwasm_
 4. EndBlock(height)       → modules kết thúc block
 5. Commit()               → persist state, trả app_hash (state root)
 ```
+
+### AnteHandler chain (ante.go)
+
+`NewPermissionlessAnteHandler` wires SDK decorators in this order:
+
+```
+SetUpContext → ExtensionOptions → ValidateBasic → TxTimeoutHeight
+→ ValidateMemo → ConsumeGasForTxSize
+→ AutoCreateAccount       (custom — creates missing signer accounts)
+→ DeductFee               (0-fee checker, but still needs fee payer in state)
+→ SetPubKey → ValidateSigCount → SigGasConsume → SigVerification
+→ IncrementSequence
+```
+
+`AutoCreateAccount` **must** run before `DeductFee` and `SetPubKey`. This is what lets a browser dApp (Keplr, etc.) submit its very first signed tx without any prior funding step. See [auto-account-creation.md](auto-account-creation.md) for the full flow, the `/auth/account` peek behavior that makes it work, and what to swap in if you ever add a real fee token.
 
 ---
 
@@ -213,7 +228,8 @@ Bridge giữa HTTP API và Cosmos SDK App. Implement `core/execution.Executor` i
 | `StoreBatch(blobs)` | Store N blobs + Merkle root |
 | `SetFinal(height)` | Mark block as finalized |
 | `GetStatus()` | Trả `StatusInfo` (initialized, height, healthy) |
-| `GetLatestBlock()` / `GetBlock(height)` | Block info |
+| `GetLatestBlock()` / `GetBlock(height)` | Block info — includes `tx_hashes` for txs included in that block. See [auto-account-creation.md](auto-account-creation.md#2-tx_hashes-on-blockinfo) |
+| `GetAccountInfo(bech32Addr)` | Auth account state. For non-existent addresses returns the **peeked** next `account_number` so a client signing a first tx puts the correct value in `SignDoc`. See [auto-account-creation.md](auto-account-creation.md) |
 | `GetStats()` | Runtime metrics (blob count, tx count, mempool size) |
 
 ### Options

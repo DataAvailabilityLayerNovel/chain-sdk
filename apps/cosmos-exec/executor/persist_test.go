@@ -25,10 +25,6 @@ func TestPersistStore_RoundTrip(t *testing.T) {
 		t.Fatalf("append block: %v", err)
 	}
 
-	if err := ps.AppendBlob("aabbcc", []byte("hello world")); err != nil {
-		t.Fatalf("append blob: %v", err)
-	}
-
 	ps.Close()
 
 	// Reopen and verify.
@@ -64,21 +60,6 @@ func TestPersistStore_RoundTrip(t *testing.T) {
 	}
 	if blocks[5].AppHash != "deadbeef" {
 		t.Fatalf("expected app hash deadbeef, got %s", blocks[5].AppHash)
-	}
-
-	store := NewBlobStore()
-	loaded, blobSkipped, err := ps2.LoadBlobs(store)
-	if err != nil {
-		t.Fatalf("load blobs: %v", err)
-	}
-	if blobSkipped != 0 {
-		t.Fatalf("expected 0 skipped blob lines, got %d", blobSkipped)
-	}
-	if loaded != 1 {
-		t.Fatalf("expected 1 blob loaded, got %d", loaded)
-	}
-	if store.Count() != 1 {
-		t.Fatalf("expected blob store count 1, got %d", store.Count())
 	}
 }
 
@@ -243,7 +224,7 @@ func TestPersistStore_FilesExist(t *testing.T) {
 	ps.AppendTxResult(TxExecutionResult{Hash: "test"})
 	ps.Close()
 
-	for _, name := range []string{"tx_results.jsonl", "blocks.jsonl", "blobs.jsonl"} {
+	for _, name := range []string{"tx_results.jsonl", "blocks.jsonl"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
 			t.Errorf("expected file %s to exist", name)
 		}

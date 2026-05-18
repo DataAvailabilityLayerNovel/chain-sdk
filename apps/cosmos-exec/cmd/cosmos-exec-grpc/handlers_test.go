@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -99,43 +97,6 @@ func TestStatusHandler(t *testing.T) {
 	}
 	if resp["chain_id"] != "test-chain" {
 		t.Fatalf("expected chain_id=test-chain, got %v", resp["chain_id"])
-	}
-}
-
-func TestBlobSubmitAndRetrieve(t *testing.T) {
-	exec := newTestExecutor(t)
-
-	// Submit blob.
-	data := []byte("hello blob world")
-	body, _ := json.Marshal(blobSubmitRequest{DataBase64: base64.StdEncoding.EncodeToString(data)})
-	req := httptest.NewRequest(http.MethodPost, "/blob/submit", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	blobSubmitHandler(exec)(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("submit: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var submitResp blobSubmitResponse
-	json.Unmarshal(w.Body.Bytes(), &submitResp)
-	if submitResp.Commitment == "" {
-		t.Fatal("expected commitment in response")
-	}
-
-	// Retrieve blob.
-	req2 := httptest.NewRequest(http.MethodGet, "/blob/retrieve?commitment="+submitResp.Commitment, nil)
-	w2 := httptest.NewRecorder()
-	blobRetrieveHandler(exec)(w2, req2)
-
-	if w2.Code != http.StatusOK {
-		t.Fatalf("retrieve: expected 200, got %d: %s", w2.Code, w2.Body.String())
-	}
-
-	var retrieveResp blobRetrieveResponse
-	json.Unmarshal(w2.Body.Bytes(), &retrieveResp)
-	decoded, _ := base64.StdEncoding.DecodeString(retrieveResp.DataBase64)
-	if string(decoded) != string(data) {
-		t.Fatalf("expected %q, got %q", string(data), string(decoded))
 	}
 }
 

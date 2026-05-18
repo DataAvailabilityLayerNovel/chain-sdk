@@ -12,7 +12,6 @@ import (
 //   - metadata.json: chain identity and latest checkpoint (initialized, chainID, stateRoot, heights)
 //   - tx_results.jsonl: append-only tx execution results
 //   - blocks.jsonl: append-only block info
-//   - blobs.jsonl: append-only blob data
 //
 // On startup, all files are replayed into memory. During operation, new data
 // is appended. Metadata is overwritten (not appended) on every state change.
@@ -22,7 +21,6 @@ type PersistStore struct {
 
 	txFile    *os.File
 	blockFile *os.File
-	blobFile  *os.File
 }
 
 // ChainMetadata holds the executor's critical state that must survive restarts.
@@ -44,12 +42,6 @@ type persistedBlock struct {
 	Data BlockInfo `json:"data"`
 }
 
-type persistedBlob struct {
-	Type       string `json:"type"`
-	Commitment string `json:"commitment"`
-	DataHex    string `json:"data_hex"`
-}
-
 // NewPersistStore opens (or creates) the persistence directory and files.
 func NewPersistStore(dir string) (*PersistStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -67,18 +59,10 @@ func NewPersistStore(dir string) (*PersistStore, error) {
 		return nil, fmt.Errorf("open blocks.jsonl: %w", err)
 	}
 
-	blobFile, err := os.OpenFile(filepath.Join(dir, "blobs.jsonl"), os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
-	if err != nil {
-		txFile.Close()
-		blockFile.Close()
-		return nil, fmt.Errorf("open blobs.jsonl: %w", err)
-	}
-
 	return &PersistStore{
 		dir:       dir,
 		txFile:    txFile,
 		blockFile: blockFile,
-		blobFile:  blobFile,
 	}, nil
 }
 
@@ -88,7 +72,7 @@ func (p *PersistStore) Close() error {
 	defer p.mu.Unlock()
 
 	var firstErr error
-	for _, f := range []*os.File{p.txFile, p.blockFile, p.blobFile} {
+	for _, f := range []*os.File{p.txFile, p.blockFile} {
 		if f != nil {
 			if err := f.Close(); err != nil && firstErr == nil {
 				firstErr = err
@@ -121,23 +105,6 @@ func (p *PersistStore) AppendBlock(block BlockInfo) error {
 		return err
 	}
 	_, err = p.blockFile.Write(append(line, '\n'))
-	return err
-}
-
-// AppendBlob appends a blob commitment+data to disk.
-func (p *PersistStore) AppendBlob(commitment string, data []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	line, err := json.Marshal(persistedBlob{
-		Type:       "blob",
-		Commitment: commitment,
-		DataHex:    fmt.Sprintf("%x", data),
-	})
-	if err != nil {
-		return err
-	}
-	_, err = p.blobFile.Write(append(line, '\n'))
 	return err
 }
 
@@ -235,40 +202,6 @@ func (p *PersistStore) LoadBlocks() (map[uint64]BlockInfo, int, error) {
 		blocks[rec.Data.Height] = rec.Data
 	}
 	return blocks, skipped, nil
-}
-
-// LoadBlobs reads all persisted blobs into the given BlobStore.
-// Returns an error for I/O failures; corrupt lines are skipped with a count.
-func (p *PersistStore) LoadBlobs(store *BlobStore) (loaded int, skipped int, err error) {
-	data, err := os.ReadFile(filepath.Join(p.dir, "blobs.jsonl"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, 0, nil
-		}
-		return 0, 0, fmt.Errorf("read blobs.jsonl: %w", err)
-	}
-
-	for _, line := range splitLines(data) {
-		if len(line) == 0 {
-			continue
-		}
-		var rec persistedBlob
-		if err := json.Unmarshal(line, &rec); err != nil {
-			skipped++
-			continue
-		}
-		blobData, err := hexDecode(rec.DataHex)
-		if err != nil {
-			skipped++
-			continue
-		}
-		if _, err := store.Put(blobData); err != nil {
-			skipped++
-			continue
-		}
-		loaded++
-	}
-	return loaded, skipped, nil
 }
 
 func splitLines(data []byte) [][]byte {

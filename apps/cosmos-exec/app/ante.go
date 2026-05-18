@@ -82,6 +82,11 @@ func NewPermissionlessAnteHandler(
 		authante.NewTxTimeoutHeightDecorator(),
 		authante.NewValidateMemoDecorator(ak),
 		authante.NewConsumeGasForTxSizeDecorator(ak),
+		// Auto-create accounts BEFORE DeductFee so the fee payer (= first signer
+		// by default) exists in state when DeductFee looks it up. Otherwise the
+		// first tx from a fresh Keplr account fails with "fee payer address
+		// <bytes> does not exist: unknown address".
+		NewAutoCreateAccountDecorator(ak),
 		// Accept 0-fee txs. Replace with a real checker once a fee token exists.
 		authante.NewDeductFeeDecorator(ak, bk, nil, func(_ sdk.Context, tx sdk.Tx) (sdk.Coins, int64, error) {
 			feeTx, ok := tx.(sdk.FeeTx)
@@ -90,7 +95,6 @@ func NewPermissionlessAnteHandler(
 			}
 			return feeTx.GetFee(), int64(feeTx.GetGas()), nil
 		}),
-		NewAutoCreateAccountDecorator(ak),
 		authante.NewSetPubKeyDecorator(ak),
 		authante.NewValidateSigCountDecorator(ak),
 		authante.NewSigGasConsumeDecorator(ak, authante.DefaultSigVerificationGasConsumer),

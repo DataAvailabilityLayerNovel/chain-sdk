@@ -40,20 +40,16 @@ type CosmosExecutor struct {
 	txResults map[string]TxExecutionResult
 	blocks    map[uint64]BlockInfo
 
-	// blobStore holds large data blobs off WASM contract state.
-	// Callers store the returned commitment (32-byte SHA-256 hex) on-chain
-	// via a WASM message, keeping gas costs minimal.
-	blobStore *BlobStore
-
 	queryGasMax  uint64
 	persistStore *PersistStore
 }
 
 type BlockInfo struct {
-	Height  uint64 `json:"height"`
-	Time    string `json:"time"`
-	AppHash string `json:"app_hash"`
-	NumTxs  int    `json:"num_txs"`
+	Height    uint64   `json:"height"`
+	Time      string   `json:"time"`
+	AppHash   string   `json:"app_hash"`
+	NumTxs    int      `json:"num_txs"`
+	TxHashes  []string `json:"tx_hashes,omitempty"`
 }
 
 type StatusInfo struct {
@@ -76,11 +72,17 @@ type TxEvent struct {
 }
 
 type TxExecutionResult struct {
-	Hash   string    `json:"hash"`
-	Height uint64    `json:"height"`
-	Code   uint32    `json:"code"`
-	Log    string    `json:"log"`
-	Events []TxEvent `json:"events,omitempty"`
+	Hash      string    `json:"hash"`
+	Height    uint64    `json:"height"`
+	Code      uint32    `json:"code"`
+	Log       string    `json:"log"`
+	Events    []TxEvent `json:"events,omitempty"`
+	GasUsed   uint64    `json:"gas_used,omitempty"`
+	GasWanted uint64    `json:"gas_wanted,omitempty"`
+	// Bytes is the on-wire size of the encoded tx — what gets posted to DA.
+	// Used by the cost estimator to compute DA cost without re-fetching the
+	// raw tx.
+	Bytes uint64 `json:"bytes,omitempty"`
 }
 
 // Option configures the executor at creation time.
@@ -95,15 +97,8 @@ func WithQueryGasMax(gas uint64) Option {
 	}
 }
 
-// WithBlobStoreLimits sets size limits on the in-memory blob store.
-func WithBlobStoreLimits(maxBlobSize, maxTotalSize int) Option {
-	return func(e *CosmosExecutor) {
-		e.blobStore = NewBlobStoreWithLimits(maxBlobSize, maxTotalSize)
-	}
-}
-
-// WithPersistence enables disk-backed persistence for blobs, tx results, blocks,
-// and chain metadata. On startup it replays persisted data into memory; during
+// WithPersistence enables disk-backed persistence for tx results, blocks, and
+// chain metadata. On startup it replays persisted data into memory; during
 // operation it appends new data.
 //
 // Returns an error via initErr if persistence setup or replay fails. Check
@@ -171,16 +166,8 @@ func WithPersistence(dir string, initErr *error) Option {
 			}
 		}
 
-		// Replay blobs.
-		blobLoaded, blobSkipped, err := ps.LoadBlobs(e.blobStore)
-		if err != nil {
-			setErr(fmt.Errorf("load blobs: %w", err))
-			return
-		}
-
-		_ = blobLoaded
 		// Report skipped lines (corrupt data) but don't fail.
-		totalSkipped := txSkipped + blockSkipped + blobSkipped
+		totalSkipped := txSkipped + blockSkipped
 		if totalSkipped > 0 && initErr != nil {
 			// Not a hard error — data is partially recovered. Log via the error
 			// pointer so callers can decide whether to warn or abort.
@@ -196,71 +183,12 @@ func New(appInstance *app.App, opts ...Option) *CosmosExecutor {
 		mempool:     make([][]byte, 0, 1024),
 		txResults:   make(map[string]TxExecutionResult),
 		blocks:      make(map[uint64]BlockInfo),
-		blobStore:   NewBlobStore(),
 		queryGasMax: 50_000_000,
 	}
 	for _, opt := range opts {
 		opt(exec)
 	}
 	return exec
-}
-
-// StoreBlob stores arbitrary data in the executor's content-addressed blob
-// store and returns a hex-encoded SHA-256 commitment.  The caller should
-// record this commitment in their WASM contract (cheap, 32 bytes on-chain)
-// rather than embedding the raw data in a contract message.
-func (e *CosmosExecutor) StoreBlob(ctx context.Context, data []byte) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	commitment, err := e.blobStore.Put(data)
-	if err != nil {
-		return "", err
-	}
-	if e.persistStore != nil {
-		if persistErr := e.persistStore.AppendBlob(commitment, data); persistErr != nil {
-			return "", fmt.Errorf("persist blob: %w", persistErr)
-		}
-	}
-	return commitment, nil
-}
-
-// RetrieveBlob fetches a blob by its SHA-256 commitment.
-// Returns an error when the commitment is not found in the local store.
-func (e *CosmosExecutor) RetrieveBlob(ctx context.Context, commitment string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	data, ok := e.blobStore.Get(commitment)
-	if !ok {
-		return nil, fmt.Errorf("blob not found: %s", commitment)
-	}
-	return data, nil
-}
-
-// StoreBatch stores multiple blobs atomically, computes a binary Merkle root
-// over their SHA-256 commitments, and returns (root, commitments).
-// Commit the root on-chain via BuildBatchRootTx; individual commitments allow
-// per-blob retrieval and Merkle inclusion proofs.
-func (e *CosmosExecutor) StoreBatch(ctx context.Context, blobs [][]byte) (root string, commitments []string, err error) {
-	if err := ctx.Err(); err != nil {
-		return "", nil, err
-	}
-	root, commitments, err = e.blobStore.PutBatch(blobs)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Persist each blob individually so they survive restarts.
-	if e.persistStore != nil {
-		for i, c := range commitments {
-			if persistErr := e.persistStore.AppendBlob(c, blobs[i]); persistErr != nil {
-				return "", nil, fmt.Errorf("persist blob[%d]: %w", i, persistErr)
-			}
-		}
-	}
-
-	return root, commitments, nil
 }
 
 func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, initialHeight uint64, chainID string) ([]byte, error) {
@@ -378,17 +306,22 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 	}
 
 	// Process tx results from FinalizeBlock response
+	txHashes := make([]string, 0, len(finalizeResp.TxResults))
 	for i, txResult := range finalizeResp.TxResults {
 		if i >= len(validTxs) {
 			break
 		}
 		txHash := hashTx(validTxs[i])
+		txHashes = append(txHashes, txHash)
 		result := TxExecutionResult{
-			Hash:   txHash,
-			Height: blockHeight,
-			Code:   txResult.Code,
-			Log:    txResult.Log,
-			Events: toExecTxEvents(txResult.Events),
+			Hash:      txHash,
+			Height:    blockHeight,
+			Code:      txResult.Code,
+			Log:       txResult.Log,
+			Events:    toExecTxEvents(txResult.Events),
+			GasUsed:   safeUint64(txResult.GasUsed),
+			GasWanted: safeUint64(txResult.GasWanted),
+			Bytes:     uint64(len(validTxs[i])),
 		}
 		e.txResults[txHash] = result
 		if e.persistStore != nil {
@@ -408,10 +341,11 @@ func (e *CosmosExecutor) ExecuteTxs(ctx context.Context, txs [][]byte, blockHeig
 	e.lastHeight = blockHeight
 
 	blockInfo := BlockInfo{
-		Height:  blockHeight,
-		Time:    timestamp.UTC().Format(time.RFC3339),
-		AppHash: fmt.Sprintf("%x", e.stateRoot),
-		NumTxs:  len(txs),
+		Height:   blockHeight,
+		Time:     timestamp.UTC().Format(time.RFC3339),
+		AppHash:  fmt.Sprintf("%x", e.stateRoot),
+		NumTxs:   len(txs),
+		TxHashes: txHashes,
 	}
 	e.blocks[blockHeight] = blockInfo
 	if e.persistStore != nil {
@@ -533,7 +467,25 @@ func (e *CosmosExecutor) GetAccountInfo(ctx context.Context, bech32Addr string) 
 
 	acc := e.app.AccountKeeper.GetAccount(queryCtx, addr)
 	if acc == nil {
-		return AccountInfo{Address: bech32Addr, Exists: false}, nil
+		// Account doesn't exist yet — but the AutoCreateAccount ante decorator
+		// will create it on the next signed tx, assigning the next global
+		// account number. Peek that value so the client can sign with the
+		// account_number the chain will use at SigVerification time.
+		//
+		// Note: this is racy under concurrent first-tx submission from
+		// different new addresses (two callers see the same peeked number).
+		// Fine for single-user dev; if you add a real faucet/funding flow,
+		// rip this out and require accounts to exist before signing.
+		nextNum, err := e.app.AccountKeeper.AccountNumber.Peek(queryCtx)
+		if err != nil {
+			return AccountInfo{}, fmt.Errorf("peek next account number: %w", err)
+		}
+		return AccountInfo{
+			Address:       bech32Addr,
+			AccountNumber: nextNum,
+			Sequence:      0,
+			Exists:        false,
+		}, nil
 	}
 	return AccountInfo{
 		Address:       bech32Addr,
@@ -775,8 +727,6 @@ func (e *CosmosExecutor) Close() {
 
 // Stats holds runtime metrics for monitoring.
 type Stats struct {
-	BlobCount     int `json:"blob_count"`
-	BlobBytes     int `json:"blob_bytes"`
 	TxResultCount int `json:"tx_result_count"`
 	BlockCount    int `json:"block_count"`
 	MempoolSize   int `json:"mempool_size"`
@@ -788,8 +738,6 @@ func (e *CosmosExecutor) GetStats() Stats {
 	defer e.mu.Unlock()
 
 	return Stats{
-		BlobCount:     e.blobStore.Count(),
-		BlobBytes:     e.blobStore.TotalBytes(),
 		TxResultCount: len(e.txResults),
 		BlockCount:    len(e.blocks),
 		MempoolSize:   len(e.mempool),
@@ -826,6 +774,16 @@ func bytesEqual(a, b []byte) bool {
 func hashTx(tx []byte) string {
 	h := sha256.Sum256(tx)
 	return fmt.Sprintf("%x", h[:])
+}
+
+// safeUint64 clamps a signed ABCI gas value to a non-negative uint64. ABCI's
+// GasUsed/GasWanted are int64; spec says they're non-negative, but we don't
+// want a misbehaving handler to wrap into a giant uint64.
+func safeUint64(v int64) uint64 {
+	if v < 0 {
+		return 0
+	}
+	return uint64(v)
 }
 
 func normalizeHash(hash string) string {

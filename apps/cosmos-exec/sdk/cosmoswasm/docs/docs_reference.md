@@ -11,3 +11,4 @@
 | [Troubleshooting](troubleshooting.md) | Common failures, diagnostic curl commands, debug checklist |
 | [Migration Guide](migration.md) | v0.2→v0.3 changes, internal separation, v1.0 plan |
 | [Chain Runtime Flow](chain-flow.md) | Tx lifecycle, block production, DA submission, node sync, P2P broadcast |
+| [Auto Account Creation & Tx Indexing](auto-account-creation.md) | Permissionless first-tx flow for browser dApps (Keplr), `/auth/account` peek behavior, `tx_hashes` field on blocks |

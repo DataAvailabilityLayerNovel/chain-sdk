@@ -219,7 +219,25 @@ go run ./cmd/cosmos-exec-grpc --profile prod --home /data/cosmos-exec
 # Look for log line: "persistence enabled" dir="/data/cosmos-exec/data"
 ```
 
-### 11. Port already in use
+### 11. `fee payer address: <garbled bytes> does not exist: unknown address` (code 9)
+
+**Symptom:** First signed tx from a fresh Keplr / browser account fails. The address renders as non-ASCII bytes (`��Yp�…`).
+
+**Cause:** The ante chain runs `DeductFeeDecorator` **before** `AutoCreateAccountDecorator`, so DeductFee looks up the fee payer (= first signer when no explicit fee payer is set) in state before AutoCreate has had a chance to create the account. `FeeTx.FeePayer()` returns `[]byte` (raw address) in cosmos-sdk v0.50, hence the garbled `%s` formatting.
+
+**Fix:** In `apps/cosmos-exec/app/ante.go`, ensure `NewAutoCreateAccountDecorator` precedes `NewDeductFeeDecorator` in `NewPermissionlessAnteHandler`. See [auto-account-creation.md](auto-account-creation.md).
+
+### 12. `signature verification failed; please verify account number (N) and chain-id (...)` (code 4)
+
+**Symptom:** First signed tx from a fresh account is rejected with `unauthorized` even though the signature itself is correctly produced.
+
+**Cause:** The client signed `SignDoc` with `account_number = 0` (zero-value returned for non-existent accounts), but `AutoCreateAccountDecorator` assigned a different, globally-unique number from `GlobalAccountNumber`. `SigVerificationDecorator` rebuilds `SignDoc` with the chain's number, the two don't match, and verification fails.
+
+**Fix:** `executor.GetAccountInfo` peeks `AccountKeeper.AccountNumber.Peek(ctx)` for not-yet-existing accounts and returns that number — same value `NewAccountWithAddress` will subsequently assign. The client signs with that number and verification succeeds. See [auto-account-creation.md](auto-account-creation.md#b-authaccount-peeks-the-future-number).
+
+> **Do not** pin auto-created accounts to `account_number = 0` to work around this — the SDK enforces a uniqueness index on `account_number → address`, and module accounts already occupy the low numbers. You will get `collections: conflict: index uniqueness constrain violation: 0` and a panic.
+
+### 13. Port already in use
 
 **Symptom:** `bind: address already in use`.
 

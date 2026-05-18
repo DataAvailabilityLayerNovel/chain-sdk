@@ -24,7 +24,6 @@ import (
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/app"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/config"
 	"github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/executor"
-	cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 	execgrpc "github.com/DataAvailabilityLayerNovel/chain-sdk/execution/grpc"
 )
 
@@ -78,16 +77,14 @@ func main() {
 	// Build executor options.
 	opts := []executor.Option{
 		executor.WithQueryGasMax(cfg.QueryGasMax),
-		executor.WithBlobStoreLimits(cfg.MaxBlobSize, cfg.MaxStoreTotalSize),
 	}
 
 	// Enable persistence by default when not in-memory mode.
 	if !cfg.InMemory {
-		cfg.PersistBlobs = true
 		cfg.PersistTxResults = true
 	}
 	var persistErr error
-	if cfg.PersistBlobs || cfg.PersistTxResults {
+	if cfg.PersistTxResults {
 		persistDir := cfg.ResolveDataDir()
 		if persistDir != "" {
 			opts = append(opts, executor.WithPersistence(persistDir, &persistErr))
@@ -105,11 +102,8 @@ func main() {
 	handler := execgrpc.NewExecutorServiceHandlerWithMux(cosmosExecutor, func(mux *http.ServeMux) {
 		mux.HandleFunc("/tx/submit", withMetrics(submitTxHandler(cosmosExecutor), m, "tx_submit"))
 		mux.HandleFunc("/tx/result", txResultHandler(cosmosExecutor))
+		mux.HandleFunc("/tx/estimate", txEstimateHandler(cosmosExecutor))
 		mux.HandleFunc("/wasm/query-smart", withMetrics(querySmartHandler(cosmosExecutor), m, "query"))
-		mux.HandleFunc("/blob/submit", withMetrics(blobSubmitHandler(cosmosExecutor), m, "blob_submit"))
-		mux.HandleFunc("/blob/retrieve", blobRetrieveHandler(cosmosExecutor))
-		mux.HandleFunc("/blob/batch", withMetrics(blobBatchHandler(cosmosExecutor), m, "blob_submit"))
-		mux.HandleFunc("/blob/estimate-cost", blobEstimateCostHandler())
 		mux.HandleFunc("/blocks/latest", blocksLatestHandler(cosmosExecutor))
 		mux.HandleFunc("/blocks/{height}", blockByHeightHandler(cosmosExecutor))
 		mux.HandleFunc("/status", statusHandler(cosmosExecutor))
@@ -160,7 +154,7 @@ func main() {
 			"addr", cfg.ListenAddr,
 			"profile", string(cfg.Profile),
 			"in_memory", cfg.InMemory,
-			"persist", cfg.PersistBlobs || cfg.PersistTxResults,
+			"persist", cfg.PersistTxResults,
 			"rate_limit", cfg.RateLimitRPS,
 			"auth", cfg.AuthToken != "",
 		)
@@ -246,43 +240,25 @@ type querySmartRequest struct {
 	Msg      json.RawMessage `json:"msg"`
 }
 
-type blobSubmitRequest struct {
-	DataBase64 string `json:"data_base64"`
-}
-
-type blobSubmitResponse struct {
-	Commitment string `json:"commitment"`
-	Size       int    `json:"size"`
-}
-
-type blobRetrieveResponse struct {
-	Commitment string `json:"commitment"`
-	DataBase64 string `json:"data_base64"`
-	Size       int    `json:"size"`
-}
-
-type blobBatchRequest struct {
-	BlobsBase64 []string `json:"blobs_base64"`
-}
-
-type blobBatchResponse struct {
-	Root        string   `json:"root"`
-	Commitments []string `json:"commitments"`
-	Count       int      `json:"count"`
-}
-
-type estimateCostRequest struct {
-	DataBytes   int     `json:"data_bytes"`
-	GasPriceTIA float64 `json:"gas_price_tia,omitempty"`
-	MaxBlobSize int     `json:"max_blob_size,omitempty"`
+// estimateRequest is one of three shapes:
+//   - {tx_base64} or {tx_hex} + optional {gas}: estimate from raw tx + gas hint
+//   - {hash}: look up an already-executed tx by hash
+//   - {bytes, gas}: pure math, no tx required
+//
+// The handler picks whichever inputs are populated.
+type estimateRequest struct {
+	TxBase64 string `json:"tx_base64,omitempty"`
+	TxHex    string `json:"tx_hex,omitempty"`
+	Hash     string `json:"hash,omitempty"`
+	Bytes    uint64 `json:"bytes,omitempty"`
+	Gas      uint64 `json:"gas,omitempty"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-const maxTxSize = 10 * 1024 * 1024   // 10 MB
-const maxBlobBatchSize = 100          // max blobs per batch
-const maxQueryMsgSize = 256 * 1024    // 256 KB
-const maxHashLen = 128                // max hash hex length
+const maxTxSize = 10 * 1024 * 1024 // 10 MB
+const maxQueryMsgSize = 256 * 1024 // 256 KB
+const maxHashLen = 128             // max hash hex length
 
 func submitTxHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +323,81 @@ func txResultHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{"found": true, "result": result})
+		cost := getCostPolicy().estimate(result.Bytes, result.GasUsed)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"found":  true,
+			"result": result,
+			"cost":   cost,
+		})
+	}
+}
+
+// txEstimateHandler returns the simulated cost of a tx without charging the
+// user. Useful for pre-broadcast cost preview and for re-running the math
+// when the policy constants change. Accepts any of:
+//   - tx_base64 / tx_hex (+ gas hint): bytes = len(raw), gas = caller's
+//     wanted gas (since we haven't executed it yet)
+//   - hash: looks up bytes + gas_used from the stored result
+//   - bytes + gas: pure math, no inputs required
+func txEstimateHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxTxSize))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+		var req estimateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+
+		bytes := req.Bytes
+		gas := req.Gas
+		var lookupHash string
+
+		switch {
+		case strings.TrimSpace(req.Hash) != "":
+			lookupHash = strings.TrimSpace(req.Hash)
+			if len(lookupHash) > maxHashLen {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hash too long"})
+				return
+			}
+			result, found, err := exec.GetTxResult(r.Context(), lookupHash)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			if !found {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "tx not found"})
+				return
+			}
+			bytes = result.Bytes
+			gas = result.GasUsed
+		case req.TxBase64 != "" || req.TxHex != "":
+			raw, err := decodeTx(req.TxHex, req.TxBase64)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			bytes = uint64(len(raw))
+			// gas stays as whatever caller provided — we can't know without
+			// running the tx. Caller is expected to pass their fee tx's gas.
+		}
+
+		if bytes == 0 && gas == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "supply one of {tx_base64|tx_hex} + gas, {hash}, or {bytes, gas}",
+			})
+			return
+		}
+
+		cost := getCostPolicy().estimate(bytes, gas)
+		writeJSON(w, http.StatusOK, cost)
 	}
 }
 
@@ -398,171 +448,6 @@ func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{"data": decoded})
-	}
-}
-
-func blobSubmitHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
-			return
-		}
-
-		var req blobSubmitRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
-			return
-		}
-
-		req.DataBase64 = strings.TrimSpace(req.DataBase64)
-		if req.DataBase64 == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_base64 is required"})
-			return
-		}
-
-		data, err := base64.StdEncoding.DecodeString(req.DataBase64)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid base64: " + err.Error()})
-			return
-		}
-
-		commitment, err := exec.StoreBlob(r.Context(), data)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, blobSubmitResponse{
-			Commitment: commitment,
-			Size:       len(data),
-		})
-	}
-}
-
-func blobBatchHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
-			return
-		}
-
-		var req blobBatchRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
-			return
-		}
-
-		if len(req.BlobsBase64) == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "blobs_base64 is required and must not be empty"})
-			return
-		}
-		if len(req.BlobsBase64) > maxBlobBatchSize {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("batch too large: max %d blobs", maxBlobBatchSize)})
-			return
-		}
-
-		blobs := make([][]byte, 0, len(req.BlobsBase64))
-		for i, b64 := range req.BlobsBase64 {
-			data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
-			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid base64 at index %d: %v", i, err)})
-				return
-			}
-			blobs = append(blobs, data)
-		}
-
-		root, commitments, err := exec.StoreBatch(r.Context(), blobs)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, blobBatchResponse{
-			Root:        root,
-			Commitments: commitments,
-			Count:       len(commitments),
-		})
-	}
-}
-
-func blobRetrieveHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-
-		commitment := strings.TrimSpace(r.URL.Query().Get("commitment"))
-		if commitment == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitment is required"})
-			return
-		}
-		if len(commitment) > 128 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "commitment too long"})
-			return
-		}
-
-		data, err := exec.RetrieveBlob(r.Context(), commitment)
-		if err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, blobRetrieveResponse{
-			Commitment: commitment,
-			DataBase64: base64.StdEncoding.EncodeToString(data),
-			Size:       len(data),
-		})
-	}
-}
-
-func blobEstimateCostHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-
-		body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
-			return
-		}
-
-		var req estimateCostRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
-			return
-		}
-
-		if req.DataBytes <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_bytes must be > 0"})
-			return
-		}
-		if req.DataBytes > 100*1024*1024 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "data_bytes exceeds 100 MB limit"})
-			return
-		}
-
-		est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{
-			DataBytes:   req.DataBytes,
-			GasPriceTIA: req.GasPriceTIA,
-			MaxBlobSize: req.MaxBlobSize,
-		})
-
-		writeJSON(w, http.StatusOK, est)
 	}
 }
 
@@ -706,14 +591,19 @@ func txByHashHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			status = "failed"
 		}
 
+		cost := getCostPolicy().estimate(result.Bytes, result.GasUsed)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"hash":   result.Hash,
-			"status": status,
-			"found":  true,
-			"height": result.Height,
-			"code":   result.Code,
-			"log":    result.Log,
-			"events": result.Events,
+			"hash":       result.Hash,
+			"status":     status,
+			"found":      true,
+			"height":     result.Height,
+			"code":       result.Code,
+			"log":        result.Log,
+			"events":     result.Events,
+			"gas_used":   result.GasUsed,
+			"gas_wanted": result.GasWanted,
+			"bytes":      result.Bytes,
+			"cost":       cost,
 		})
 	}
 }
@@ -728,8 +618,6 @@ func healthHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 		stats := exec.GetStats()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":      "ok",
-			"blob_count":  stats.BlobCount,
-			"blob_bytes":  stats.BlobBytes,
 			"tx_count":    stats.TxResultCount,
 			"block_count": stats.BlockCount,
 		})

@@ -55,10 +55,20 @@
       "Bash(find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia-openrpc*\" 2>/dev/null | head -5; find /Users/nguyennganha/go/pkg/mod -type d -name \"celestia*\" 2>/dev/null | head -10)",
       "Read(//Users/nguyennganha/go/pkg/mod/**)",
       "Bash(unset COSMOS_EXEC_ENFORCE_SIGNATURES)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)",
+      "Bash(mkdir -p \"/Users/nguyennganha/code/my-dapp-web/src/app/explorer/tx/[hash]\")",
+      "Bash(node -e \"const t=require\\('cosmjs-types/cosmos/tx/v1beta1/tx'\\); console.log\\(Object.keys\\(t\\)\\); const w=require\\('cosmjs-types/cosmwasm/wasm/v1/tx'\\); console.log\\(Object.keys\\(w\\).filter\\(k=>k.startsWith\\('Msg'\\)\\)\\);\")"
     ],
     "additionalDirectories": [
-      "/tmp"
+      "/tmp",
+      "/Users/nguyennganha/code/my-dapp-web/src/app",
+      "/Users/nguyennganha/code/my-dapp-web/src/lib",
+      "/Users/nguyennganha/code/my-dapp-web/src/components",
+      "/Users/nguyennganha/code/my-dapp-web",
+      "/Users/nguyennganha/code/my-dapp-web/src/app/explorer/tx"
     ]
   }
 }

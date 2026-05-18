@@ -84,14 +84,6 @@ func metricsHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerFunc 
 		fmt.Fprintf(w, "# TYPE cosmos_exec_queries_total counter\n")
 		fmt.Fprintf(w, "cosmos_exec_queries_total %d\n", m.queryCount.Load())
 
-		fmt.Fprintf(w, "# HELP cosmos_exec_blob_count Number of blobs in store.\n")
-		fmt.Fprintf(w, "# TYPE cosmos_exec_blob_count gauge\n")
-		fmt.Fprintf(w, "cosmos_exec_blob_count %d\n", stats.BlobCount)
-
-		fmt.Fprintf(w, "# HELP cosmos_exec_blob_bytes_total Total blob bytes stored.\n")
-		fmt.Fprintf(w, "# TYPE cosmos_exec_blob_bytes_total gauge\n")
-		fmt.Fprintf(w, "cosmos_exec_blob_bytes_total %d\n", stats.BlobBytes)
-
 		fmt.Fprintf(w, "# HELP cosmos_exec_tx_results_count Number of executed tx results.\n")
 		fmt.Fprintf(w, "# TYPE cosmos_exec_tx_results_count gauge\n")
 		fmt.Fprintf(w, "cosmos_exec_tx_results_count %d\n", stats.TxResultCount)
@@ -118,8 +110,6 @@ func metricsJSONHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerF
 			"tx_submits_total": m.txSubmitCount.Load(),
 			"blob_submits":     m.blobSubmitCount.Load(),
 			"queries_total":    m.queryCount.Load(),
-			"blob_count":       stats.BlobCount,
-			"blob_bytes":       stats.BlobBytes,
 			"tx_results":       stats.TxResultCount,
 			"blocks":           stats.BlockCount,
 			"mempool_size":     stats.MempoolSize,
