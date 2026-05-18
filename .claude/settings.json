@@ -60,7 +60,12 @@
       "Bash(npx tsc *)",
       "Bash(npx next *)",
       "Bash(mkdir -p \"/Users/nguyennganha/code/my-dapp-web/src/app/explorer/tx/[hash]\")",
-      "Bash(node -e \"const t=require\\('cosmjs-types/cosmos/tx/v1beta1/tx'\\); console.log\\(Object.keys\\(t\\)\\); const w=require\\('cosmjs-types/cosmwasm/wasm/v1/tx'\\); console.log\\(Object.keys\\(w\\).filter\\(k=>k.startsWith\\('Msg'\\)\\)\\);\")"
+      "Bash(node -e \"const t=require\\('cosmjs-types/cosmos/tx/v1beta1/tx'\\); console.log\\(Object.keys\\(t\\)\\); const w=require\\('cosmjs-types/cosmwasm/wasm/v1/tx'\\); console.log\\(Object.keys\\(w\\).filter\\(k=>k.startsWith\\('Msg'\\)\\)\\);\")",
+      "Skill(ev-node-explainer)",
+      "Skill(ev-node-explainer:*)",
+      "Bash(gofmt -l app/genesis.go executor/genesis_balance_test.go cmd/cosmos-exec-grpc/faucet.go sdk/cosmoswasm/faucet_tx.go)",
+      "Bash(gofmt -w cmd/cosmos-exec-grpc/faucet.go)",
+      "Bash(gofmt -l cmd/cosmos-exec-grpc/faucet.go)"
     ],
     "additionalDirectories": [
       "/tmp",

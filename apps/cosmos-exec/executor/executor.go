@@ -36,6 +36,10 @@ type CosmosExecutor struct {
 	lastHeight      uint64
 	finalizedHeight uint64
 
+	// genesis, when non-nil, overrides app.DefaultGenesis() at InitChain.
+	// Used to fund a treasury at chain init (see WithGenesis).
+	genesis []byte
+
 	mempool   [][]byte
 	txResults map[string]TxExecutionResult
 	blocks    map[uint64]BlockInfo
@@ -93,6 +97,18 @@ func WithQueryGasMax(gas uint64) Option {
 	return func(e *CosmosExecutor) {
 		if gas > 0 {
 			e.queryGasMax = gas
+		}
+	}
+}
+
+// WithGenesis overrides the genesis app-state used at InitChain. Pass the
+// output of app.GenesisWithBalances(...) to fund a treasury at chain init.
+// Only applied on first init; once chain state is persisted, the stored
+// state wins (changing genesis afterwards requires a clean start).
+func WithGenesis(genesis []byte) Option {
+	return func(e *CosmosExecutor) {
+		if len(genesis) > 0 {
+			e.genesis = genesis
 		}
 	}
 }
@@ -216,11 +232,15 @@ func (e *CosmosExecutor) InitChain(ctx context.Context, genesisTime time.Time, i
 	// Set it before calling InitChain so the validation passes.
 	baseapp.SetChainID(chainID)(e.app.BaseApp)
 
+	genesisBytes := e.genesis
+	if len(genesisBytes) == 0 {
+		genesisBytes = e.app.DefaultGenesis()
+	}
 	resp, err := e.app.InitChain(&abci.RequestInitChain{
 		Time:          genesisTime,
 		ChainId:       chainID,
 		InitialHeight: int64(initialHeight),
-		AppStateBytes: e.app.DefaultGenesis(),
+		AppStateBytes: genesisBytes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init chain: %w", err)
@@ -492,6 +512,77 @@ func (e *CosmosExecutor) GetAccountInfo(ctx context.Context, bech32Addr string) 
 		AccountNumber: acc.GetAccountNumber(),
 		Sequence:      acc.GetSequence(),
 		Exists:        true,
+	}, nil
+}
+
+// BalanceInfo is the bank balance view for an address: the full coin set plus,
+// when a denom is requested, that single denom's amount broken out.
+type BalanceInfo struct {
+	Address  string    `json:"address"`
+	Balances sdk.Coins `json:"balances"`
+	Denom    string    `json:"denom,omitempty"`
+	Amount   string    `json:"amount,omitempty"`
+}
+
+// GetBalance returns the bank balances for the given bech32 address. If denom
+// is non-empty, Amount is that denom's balance (0 if the address holds none).
+func (e *CosmosExecutor) GetBalance(ctx context.Context, bech32Addr, denom string) (BalanceInfo, error) {
+	addr, err := sdk.AccAddressFromBech32(strings.TrimSpace(bech32Addr))
+	if err != nil {
+		return BalanceInfo{}, fmt.Errorf("invalid address: %w", err)
+	}
+
+	height := e.lastHeight
+	if height == 0 {
+		height = 1
+	}
+	queryCtx := e.app.BaseApp.NewContext(true).WithBlockHeight(int64(height))
+
+	out := BalanceInfo{
+		Address:  bech32Addr,
+		Balances: e.app.BankKeeper.GetAllBalances(queryCtx, addr),
+	}
+	if denom = strings.TrimSpace(denom); denom != "" {
+		out.Denom = denom
+		out.Amount = e.app.BankKeeper.GetBalance(queryCtx, addr, denom).Amount.String()
+	}
+	return out, nil
+}
+
+// SimulateResult is the gas a tx would consume if executed now, without
+// committing anything.
+type SimulateResult struct {
+	GasUsed   uint64 `json:"gas_used"`
+	GasWanted uint64 `json:"gas_wanted"`
+}
+
+// SimulateTx runs txBytes through the full ante chain + message handlers in
+// simulation mode against the last committed state. Nothing is persisted and
+// the fee policy is NOT enforced (see ante.go) so a 0-fee tx can be measured.
+// Clients use the returned gas to size gas_limit (hence the fee) before
+// signing for real.
+func (e *CosmosExecutor) SimulateTx(ctx context.Context, txBytes []byte) (SimulateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return SimulateResult{}, err
+	}
+	if len(txBytes) == 0 {
+		return SimulateResult{}, errors.New("tx cannot be empty")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if !e.initialized {
+		return SimulateResult{}, errors.New("executor not initialized")
+	}
+
+	gasInfo, _, err := e.app.Simulate(txBytes)
+	if err != nil {
+		return SimulateResult{}, fmt.Errorf("simulate: %w", err)
+	}
+	return SimulateResult{
+		GasUsed:   gasInfo.GasUsed,
+		GasWanted: gasInfo.GasWanted,
 	}, nil
 }
 

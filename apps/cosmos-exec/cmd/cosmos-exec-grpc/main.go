@@ -79,6 +79,26 @@ func main() {
 		executor.WithQueryGasMax(cfg.QueryGasMax),
 	}
 
+	// Optional treasury/faucet (approaches A+B, see docs/fee-economics.md).
+	// Enabled only when COSMOS_EXEC_TREASURY_PRIVKEY_HEX is set.
+	faucetCfg, err := loadFaucetConfig()
+	if err != nil {
+		logger.Error("faucet config invalid", "error", err)
+		os.Exit(1)
+	}
+	if faucetCfg != nil {
+		genOpt, err := faucetCfg.genesisOption(application)
+		if err != nil {
+			logger.Error("faucet genesis build failed", "error", err)
+			os.Exit(1)
+		}
+		opts = append(opts, genOpt)
+		logger.Info("treasury/faucet enabled",
+			"treasury", faucetCfg.treasury,
+			"genesis_amount", faucetCfg.genesisAmt.String(),
+			"payout", faucetCfg.payout.String())
+	}
+
 	// Enable persistence by default when not in-memory mode.
 	if !cfg.InMemory {
 		cfg.PersistTxResults = true
@@ -103,6 +123,7 @@ func main() {
 		mux.HandleFunc("/tx/submit", withMetrics(submitTxHandler(cosmosExecutor), m, "tx_submit"))
 		mux.HandleFunc("/tx/result", txResultHandler(cosmosExecutor))
 		mux.HandleFunc("/tx/estimate", txEstimateHandler(cosmosExecutor))
+		mux.HandleFunc("/tx/simulate", withMetrics(txSimulateHandler(cosmosExecutor), m, "tx_simulate"))
 		mux.HandleFunc("/wasm/query-smart", withMetrics(querySmartHandler(cosmosExecutor), m, "query"))
 		mux.HandleFunc("/blocks/latest", blocksLatestHandler(cosmosExecutor))
 		mux.HandleFunc("/blocks/{height}", blockByHeightHandler(cosmosExecutor))
@@ -117,7 +138,15 @@ func main() {
 		mux.HandleFunc("/exec/height", execHeightHandler(cosmosExecutor))
 		mux.HandleFunc("/exec/rollback", execRollbackHandler(cosmosExecutor))
 		mux.HandleFunc("/auth/account/{address}", authAccountHandler(cosmosExecutor))
+		mux.HandleFunc("/bank/balance/{address}", bankBalanceHandler(cosmosExecutor))
+		// Cosmos-LCD-shaped aliases so Keplr (which queries the registered
+		// chain's `rest` endpoint) can display the account balance.
+		mux.HandleFunc("/cosmos/bank/v1beta1/balances/{address}", lcdBalancesHandler(cosmosExecutor))
+		mux.HandleFunc("/cosmos/bank/v1beta1/balances/{address}/by_denom", lcdBalanceByDenomHandler(cosmosExecutor))
 		mux.HandleFunc("/exec/prune", execPruneHandler(cosmosExecutor))
+		if faucetCfg != nil {
+			mux.HandleFunc("/faucet", withMetrics(faucetHandler(cosmosExecutor, faucetCfg), m, "faucet"))
+		}
 		mux.HandleFunc("/swagger", swaggerUIHandler())
 		mux.HandleFunc("/swagger.json", swaggerJSONHandler())
 	})
@@ -401,6 +430,75 @@ func txEstimateHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	}
 }
 
+// gasAdjustmentPermille reads COSMOS_EXEC_GAS_ADJUSTMENT (float, default 1.3)
+// as parts-per-1000 so gas_limit = ceil(gas_used * adj) stays integer-only.
+func gasAdjustmentPermille() uint64 {
+	v := strings.TrimSpace(os.Getenv("COSMOS_EXEC_GAS_ADJUSTMENT"))
+	if v == "" {
+		return 1300
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 1.0 {
+		return 1300
+	}
+	return uint64(f * 1000)
+}
+
+// txSimulateHandler runs a (0-fee, dummy-signed) tx through the ante chain +
+// msg handlers WITHOUT committing, and returns the real gas it consumes plus a
+// suggested gas_limit (gas_used * COSMOS_EXEC_GAS_ADJUSTMENT) and the fee that
+// gas_limit implies under the same policy the ante enforces. Clients call this
+// before signing so the fee tracks the actual tx instead of a fixed constant.
+func txSimulateHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxTxSize))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
+			return
+		}
+		var req estimateRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+		raw, err := decodeTx(req.TxHex, req.TxBase64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		res, err := exec.SimulateTx(r.Context(), raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		permille := gasAdjustmentPermille()
+		gasLimit := (res.GasUsed*permille + 999) / 1000
+		if gasLimit == 0 {
+			gasLimit = res.GasWanted
+		}
+		fee := feeForGas(gasLimit)
+		feeDenom, feeAmount := "", "0"
+		if !fee.IsZero() {
+			feeDenom = fee[0].Denom
+			feeAmount = fee[0].Amount.String()
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"gas_used":   res.GasUsed,
+			"gas_wanted": res.GasWanted,
+			"gas_limit":  gasLimit,
+			"fee":        fee,
+			"fee_denom":  feeDenom,
+			"fee_amount": feeAmount,
+		})
+	}
+}
+
 func querySmartHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -517,6 +615,78 @@ func authAccountHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+// bankBalanceHandler returns the bank balances for an address. An optional
+// ?denom= query (e.g. ?denom=ustake) breaks out that single denom's amount.
+func bankBalanceHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimSpace(r.PathValue("address"))
+		if addr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+			return
+		}
+		info, err := exec.GetBalance(r.Context(), addr, r.URL.Query().Get("denom"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+// lcdBalancesHandler mirrors the Cosmos LCD route
+// GET /cosmos/bank/v1beta1/balances/{address}
+// so wallets (Keplr) pointed at this server's `rest` can read the balance.
+func lcdBalancesHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimSpace(r.PathValue("address"))
+		info, err := exec.GetBalance(r.Context(), addr, "")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"balances": info.Balances,
+			"pagination": map[string]any{
+				"next_key": nil,
+				"total":    strconv.Itoa(len(info.Balances)),
+			},
+		})
+	}
+}
+
+// lcdBalanceByDenomHandler mirrors the Cosmos LCD route
+// GET /cosmos/bank/v1beta1/balances/{address}/by_denom?denom=<denom>.
+func lcdBalanceByDenomHandler(exec *executor.CosmosExecutor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimSpace(r.PathValue("address"))
+		denom := strings.TrimSpace(r.URL.Query().Get("denom"))
+		info, err := exec.GetBalance(r.Context(), addr, denom)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		amount := info.Amount
+		if amount == "" {
+			amount = "0"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"balance": map[string]string{"denom": denom, "amount": amount},
+		})
 	}
 }
 

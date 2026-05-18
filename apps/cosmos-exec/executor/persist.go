@@ -120,14 +120,44 @@ func (p *PersistStore) SaveMetadata(meta ChainMetadata) error {
 	}
 
 	path := filepath.Join(p.dir, "metadata.json")
-	tmpPath := path + ".tmp"
+	if err := writeFileAtomicSync(path, data); err != nil {
+		return fmt.Errorf("persist metadata.json: %w", err)
+	}
+	return nil
+}
 
-	// Atomic write: write to temp, then rename.
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return fmt.Errorf("write metadata.json.tmp: %w", err)
+// writeFileAtomicSync writes data to path durably: write to a temp file,
+// fsync it, rename over the target, then fsync the parent directory so the
+// rename itself survives a crash. Without the fsyncs a power loss can leave
+// metadata.json truncated or the rename unobserved, corrupting chain state.
+func writeFileAtomicSync(path string, data []byte) error {
+	tmpPath := path + ".tmp"
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", tmpPath, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("write %s: %w", tmpPath, err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("fsync %s: %w", tmpPath, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmpPath, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename metadata.json: %w", err)
+		return fmt.Errorf("rename %s: %w", tmpPath, err)
+	}
+	// fsync the directory so the rename is durable, not just the file data.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open dir for fsync: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("fsync dir: %w", err)
 	}
 	return nil
 }

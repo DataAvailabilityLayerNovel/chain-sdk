@@ -27,6 +27,9 @@ type SignerInput struct {
 	AccountNumber uint64
 	Sequence      uint64
 	GasLimit      uint64
+	// FeeAmount is the tx fee. Leave nil/empty for a 0-fee tx (dev default);
+	// set it to satisfy the ante feePolicy when COSMOS_EXEC_MIN_GAS_PRICE > 0.
+	FeeAmount sdk.Coins
 }
 
 // Address returns the bech32 account address corresponding to PrivKey.
@@ -139,7 +142,7 @@ func BuildSignedProtoTxBytes(signer SignerInput, msgs ...sdk.Msg) ([]byte, error
 				Sequence: signer.Sequence,
 			},
 		},
-		Fee: &txv1beta1.Fee{GasLimit: gasLimit},
+		Fee: &txv1beta1.Fee{GasLimit: gasLimit, Amount: signer.FeeAmount},
 	}
 	authInfoBytes, err := proto.Marshal(authInfo)
 	if err != nil {
