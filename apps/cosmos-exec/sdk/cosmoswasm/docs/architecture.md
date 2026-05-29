@@ -149,7 +149,7 @@ SDK gọi HTTP tới executor, executor dùng `app.App` để chạy WASM.
 
 | File | Vai trò |
 |------|---------|
-| `app.go` | **`App` struct** — wrap `baseapp.BaseApp` (Cosmos SDK). Khởi tạo tất cả modules + keepers. Implement `InitChainer`, `BeginBlocker`, `EndBlocker` |
+| `app.go` | **`App` struct** — wrap `baseapp.BaseApp` (Cosmos SDK). Khởi tạo tất cả modules + keepers. Implement `InitChainer`, `BeginBlocker`, `EndBlocker` (gồm cả `sweepFeesToTreasury` — xem mục bên dưới) |
 | `wasm_deps.go` | Stub implementations cho các Cosmos SDK interfaces mà CosmWasm cần nhưng sovereign rollup không có: `noopStakingKeeper`, `noopDistributionKeeper`, `ibcClientStakingKeeper`, `ibcClientUpgradeKeeper` |
 | `app_test.go` | Test khởi tạo App |
 | `wasm_lifecycle_test.go` | Test store/instantiate/execute WASM contract qua App |
@@ -182,24 +182,39 @@ iterator, staking, stargate, cosmwasm_1_1, cosmwasm_1_2, cosmwasm_1_3, cosmwasm_
    ├─ MsgInstantiateContract → tạo contract instance, trả contract_address
    ├─ MsgExecuteContract  → gọi contract method, thay đổi state
    └─ MsgIBCTransfer      → IBC token transfer
-4. EndBlock(height)       → modules kết thúc block
+4. EndBlock(height)       → ModuleManager.EndBlock → sweepFeesToTreasury
 5. Commit()               → persist state, trả app_hash (state root)
 ```
 
+### Sweep phí về treasury (thay cho `x/distribution`)
+
+`App.EndBlocker` ([`app.go:365-399`](../../app.go#L365-L399)) gọi `sweepFeesToTreasury` *sau* `ModuleManager.EndBlock`. Hàm này đọc địa chỉ treasury từ env `COSMOS_EXEC_TREASURY_ADDR`, lấy toàn bộ balance của module account `fee_collector` qua `BankKeeper.GetAllBalances`, và chuyển trọn vẹn sang treasury bằng `BankKeeper.SendCoinsFromModuleToAccount`.
+
+Quy ước:
+
+- Env không set / bech32 sai → no-op, phí ở lại `fee_collector` (mặc định dev).
+- Mọi node trong mạng **phải** set cùng giá trị `COSMOS_EXEC_TREASURY_ADDR` — config drift sẽ gây fork (`app_hash` lệch). Cùng ràng buộc với `COSMOS_EXEC_MIN_GAS_PRICE` / `COSMOS_EXEC_GAS_DENOM`.
+- Treasury có thể là EOA, multisig, hoặc địa chỉ contract CosmWasm (mở đường cho treasury-DAO).
+
+Pattern này thay vai trò của `x/distribution` + `x/staking` trong rollup không có validator set. Chi tiết thiết kế và đo lường trong [fee-economics.md §6 — "Sweep phí cuối block"](fee-economics.md#sweep-phi-cuoi-block).
+
 ### AnteHandler chain (ante.go)
 
-`NewPermissionlessAnteHandler` wires SDK decorators in this order:
+`NewPermissionlessAnteHandler` ([`ante.go:257-285`](../../ante.go#L257-L285)) ghép các decorator theo đúng thứ tự:
 
 ```
 SetUpContext → ExtensionOptions → ValidateBasic → TxTimeoutHeight
 → ValidateMemo → ConsumeGasForTxSize
-→ AutoCreateAccount       (custom — creates missing signer accounts)
-→ DeductFee               (0-fee checker, but still needs fee payer in state)
+→ AutoCreateAccount       (custom — tự tạo account chưa tồn tại)
+→ DeductFee               (txFeeChecker đọc COSMOS_EXEC_MIN_GAS_PRICE)
 → SetPubKey → ValidateSigCount → SigGasConsume → SigVerification
 → IncrementSequence
 ```
 
-`AutoCreateAccount` **must** run before `DeductFee` and `SetPubKey`. This is what lets a browser dApp (Keplr, etc.) submit its very first signed tx without any prior funding step. See [auto-account-creation.md](auto-account-creation.md) for the full flow, the `/auth/account` peek behavior that makes it work, and what to swap in if you ever add a real fee token.
+Hai khía cạnh đáng chú ý:
+
+- **`AutoCreateAccount`** *phải* chạy trước `DeductFee` và `SetPubKey` để fee payer luôn tồn tại trong state khi các decorator phía sau lookup. Đây là cơ chế cho phép browser dApp (Keplr/OKX/Leap) submit tx ký lần đầu mà không cần một bước fund trước. Chi tiết: [auto-account-creation.md](auto-account-creation.md).
+- **`DeductFee`** sử dụng `txFeeChecker(feePolicyFromEnv())` ([`ante.go:138-180`](../../ante.go#L138-L180)). Khi `COSMOS_EXEC_MIN_GAS_PRICE` không set hoặc ≤ 0 → policy OFF, chấp nhận tx phí 0 (mặc định dev). Khi set > 0 → enforce `fee ≥ ceil(gas × minGasPrice)` tính theo `COSMOS_EXEC_GAS_DENOM`, thiếu thì `ErrInsufficientFee`. Simulate (`ExecModeSimulate`) luôn được skip để tránh chicken-and-egg với `/tx/simulate`. Chi tiết: [fee-economics.md](fee-economics.md).
 
 ---
 
@@ -270,7 +285,20 @@ Bridge giữa HTTP API và Cosmos SDK App. Implement `core/execution.Executor` i
 
 ### Environment variables
 
-Tất cả có prefix `COSMOS_EXEC_`: `COSMOS_EXEC_LISTEN_ADDR`, `COSMOS_EXEC_BLOCK_TIME`, `COSMOS_EXEC_AUTH_TOKEN`, `COSMOS_EXEC_PROFILE`, etc.
+Tất cả prefix `COSMOS_EXEC_`. Hai nhóm dưới đây *quan trọng nhất* — nhóm thứ hai có ảnh hưởng tới state transition nên **mọi node trong mạng phải set giá trị giống nhau**, lệch sẽ gây fork.
+
+| Nhóm | Biến | Ảnh hưởng |
+|------|------|-----------|
+| Server | `LISTEN_ADDR`, `BLOCK_TIME`, `AUTH_TOKEN`, `CORS_ALLOW_ORIGIN`, `RATE_LIMIT_RPS`, `PROFILE` (`dev`/`test`/`prod`) | Vận hành (per-node) |
+| Persistence | `PERSIST_TX_RESULTS`, `DATA_DIR` | Vận hành (per-node) |
+| Metrics | `METRICS_ENABLED`, `METRICS_ADDR` | Vận hành (per-node) |
+| **State transition (đồng bộ giữa các node)** | `MIN_GAS_PRICE`, `GAS_DENOM`, `TREASURY_ADDR`, `ENFORCE_SIGNATURES` | Đầu vào của AnteHandler và EndBlocker — lệch giữa các node sẽ làm `app_hash` divergent và rollup fork |
+| Faucet | `TREASURY_PRIVKEY_HEX`, `TREASURY_AMOUNT`, `FAUCET_AMOUNT`, `FAUCET_COOLDOWN_SECS` | Mở route `/faucet`; xem [fee-economics.md](fee-economics.md) |
+
+Lưu ý phân biệt **hai biến treasury khác nhau** mà tên dễ nhầm:
+
+- `COSMOS_EXEC_TREASURY_PRIVKEY_HEX` — *private key* ký giao dịch faucet (đặt ở server faucet).
+- `COSMOS_EXEC_TREASURY_ADDR` — *địa chỉ* nhận phí được EndBlocker quét từ `fee_collector` (deterministic, mọi node phải giống).
 
 ---
 
@@ -289,21 +317,36 @@ Binary chính mà SDK kết nối tới.
 | `metrics_test.go` | Metrics tests |
 | `integration_test.go` | Full API integration tests |
 
-### HTTP Endpoints (SDK gọi tới đây)
+### HTTP Endpoints
+
+Toàn bộ route được đăng ký tập trung tại [`cmd/cosmos-exec-grpc/main.go:143-172`](../../cmd/cosmos-exec-grpc/main.go#L143-L172). Khi đối chiếu với SDK, đây là tập endpoint mà `Client` gọi tới — và cũng là tập endpoint mà dApp web `my-dapp-web` dùng trực tiếp.
 
 | Method | Path | Chức năng |
 |--------|------|-----------|
-| GET | `/status` | Chain status (height, health) |
-| POST | `/tx/submit` | Submit tx bytes |
-| POST | `/tx/submit-base64` | Submit tx as base64 |
-| GET | `/tx/{hash}` | Get tx execution result |
-| POST | `/blob/submit` | Store blob, trả commitment |
-| GET | `/blob/{commitment}` | Retrieve blob by commitment |
-| POST | `/blob/batch` | Store batch, trả root + commitments |
-| POST | `/query/smart` | WASM smart query (read-only) |
-| POST | `/commit/root` | CommitRoot (batch + Merkle + on-chain tx) |
-| GET | `/swagger` | Swagger UI |
-| GET | `/metrics` | Prometheus metrics (nếu enabled) |
+| POST | `/tx/submit` | Submit tx bytes (base64/hex), trả tx hash |
+| POST | `/tx/estimate` | Ước tính gas + chi phí DA mà không thực thi |
+| POST | `/tx/simulate` | Chạy thử tx để đo gas, không persist state |
+| GET  | `/tx/result?hash=...` | Lookup kết quả execution theo hash |
+| GET  | `/tx/{hash}` | Như trên, dùng đường dẫn |
+| GET  | `/tx/pending` | Danh sách tx đang ở mempool |
+| POST | `/wasm/query-smart` | WASM smart query (read-only, có gas limit) |
+| GET  | `/blocks/latest` | Block mới nhất kèm tx_hashes |
+| GET  | `/blocks/{height}` | Chi tiết block theo height |
+| GET  | `/status` | Chain status (height, DA height, healthy) |
+| GET  | `/auth/account/{address}` | Account info (number, sequence). Trả "peek" cho địa chỉ chưa tồn tại — xem [auto-account-creation.md](auto-account-creation.md) |
+| GET  | `/bank/balance/{address}` | Số dư theo address |
+| GET  | `/cosmos/bank/v1beta1/balances/{address}` | LCD shim cho Keplr đọc balance |
+| GET  | `/cosmos/bank/v1beta1/balances/{address}/by_denom` | LCD shim cho Keplr (theo denom) |
+| GET  | `/exec/height` | Height đã thực thi (cho ev-node sync) |
+| POST | `/exec/rollback` | Rollback state về height N (admin) |
+| POST | `/exec/prune` | Prune lịch sử cũ |
+| POST/GET | `/faucet?addr=...` | Cấp test token (chỉ mở khi `COSMOS_EXEC_TREASURY_PRIVKEY_HEX` set) |
+| GET  | `/health`, `/healthz` | Liveness check |
+| GET  | `/ready` | Readiness check |
+| GET  | `/metrics` | Prometheus text metrics |
+| GET  | `/metrics.json` | Metrics dạng JSON |
+| GET  | `/swagger` | Swagger UI |
+| GET  | `/swagger.json` | OpenAPI 3.0 spec |
 
 ### Startup flow
 
@@ -330,7 +373,6 @@ main()
 | Binary | Path | Vai trò |
 |--------|------|---------|
 | `cosmos-exec` | `cmd/cosmos-exec/main.go` | Standalone executor (không có HTTP server) |
-| `cosmos-wasm-tx` | `cmd/cosmos-wasm-tx/main.go` | CLI tool: build + encode CosmWasm transactions (store, instantiate, execute). Debug tool |
 | `dal-sdk` | `cmd/dal-sdk/main.go` | CLI tool: SDK operations (blob submit/retrieve, commit, query, start chain). Demo tool |
 
 ---
@@ -365,7 +407,6 @@ Binary riêng chạy rollup full node. Kết nối tới executor qua gRPC.
 | Script | Vai trò |
 |--------|---------|
 | `run-cosmos-wasm-nodes.go` | **Start full E2E stack**: sequencer + full node + 2 execution services (ports 50051, 50052). Dùng build tag `run_cosmos_wasm` |
-| `run-cosmos-chain.sh` | Start Cosmos chain (shell script) |
 | `deploy-sample-contract.sh` | Deploy sample WASM contract |
 | `submit-tx.sh` | Submit transaction via curl |
 | `verify-da-submit.sh` | Verify DA blob submission |

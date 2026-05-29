@@ -1,0 +1,43 @@
+services:
+  cosmos-exec:
+    build:
+      context: ../../          # repo root để go.mod replace hoạt động
+      dockerfile: apps/cosmos-exec/Dockerfile
+    image: cosmos-exec-grpc:local
+    container_name: cosmos-exec
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      # Profile: dev | test | prod (override CMD nếu cần).
+      COSMOS_EXEC_PROFILE: prod
+      # Auth: bắt buộc cho prod nếu expose public.
+      COSMOS_EXEC_AUTH_TOKEN: "${COSMOS_EXEC_AUTH_TOKEN:?set in .env}"
+      # CORS: domain frontend cụ thể (đừng để * trên prod).
+      COSMOS_EXEC_CORS_ORIGIN: "${COSMOS_EXEC_CORS_ORIGIN:-https://app.mychain.io}"
+      # Rate limit per-IP (rps).
+      COSMOS_EXEC_RATE_LIMIT_RPS: "100"
+      # Faucet (bỏ block này nếu không cần).
+      COSMOS_EXEC_TREASURY_PRIVKEY_HEX: "${COSMOS_EXEC_TREASURY_PRIVKEY_HEX:-}"
+      COSMOS_EXEC_FAUCET_AMOUNT: "1000000ustake"
+      COSMOS_EXEC_FAUCET_COOLDOWN_SECONDS: "3600"
+      # Fee policy.
+      COSMOS_EXEC_MIN_GAS_PRICE: "0.001"
+      COSMOS_EXEC_GAS_DENOM: "ustake"
+    volumes:
+      - cosmos-exec-data:/var/lib/cosmos-exec
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:50051/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  cosmos-exec-data:

@@ -122,6 +122,101 @@ GET /tx/{hash}                     → tx code, log, events for each hash
 
 ---
 
+## 3. Why we still need a custom ante chain even with `x/auth`
+
+A frequent assumption: "the chain enables `x/auth`, so signatures are checked automatically." They are not. `x/auth` ships the **building blocks** — `AccountKeeper`, account types, and a set of `Decorator`s under `x/auth/ante` — but it does **not** wire them into the tx pipeline. The chain has to assemble its own `AnteHandler` from those decorators. [`NewPermissionlessAnteHandler`](../../../app/ante.go) is that wiring.
+
+On top of the wiring itself, cosmos-exec has two constraints that force a *custom* (not stock) chain:
+
+### 3.1 cosmos-exec has no CheckTx admission step
+
+In a normal Cosmos-SDK chain the ante handler runs **twice**: once in CheckTx (mempool admission) and again in DeliverTx (block execution). The mempool stage cheaply rejects garbage before it ever enters a block.
+
+cosmos-exec doesn't have that stage:
+
+```
+POST /tx/submit  →  InjectTx (queues raw bytes)  →  FinalizeBlock
+                                                    └─► ante chain runs here, once
+```
+
+Consequences:
+
+- **Without an ante chain, nothing rejects a bad tx.** It fails deep inside message execution, after gas has been metered and state may have been touched.
+- The ante chain is the **only** point where signature / sequence / fee validation happens, so it must be exhaustive. Dropping a decorator a stock chain has is not a free optimization — it's a security hole.
+
+### 3.2 Auto-account-creation forces a non-stock ordering
+
+Stock `authante.NewAnteHandler` was written for chains where every signer is pre-funded. Its order is:
+
+```
+… → DeductFee → SetPubKey → SigVerification → IncrementSequence
+```
+
+There is no slot for "create the account first." Inserting `AutoCreateAccount` requires picking the exact right position (after `ValidateBasic` so we don't create accounts for malformed txs; before `DeductFee` so the fee payer lookup finds the new account — see §1.a). That's why we ship our own constructor instead of calling `authante.NewAnteHandler`.
+
+### 3.3 What `x/auth` provides vs. what the ante chain provides
+
+| Concern                                | `x/auth` module                                 | Ante chain                                                  |
+| -------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------- |
+| Account storage (`AccountKeeper`)      | Yes — `BaseAccount`, account_number, sequence   | Reads/writes it                                             |
+| Signature cryptography primitives      | Yes — sign-mode handlers, pubkey types          | Calls them                                                  |
+| **Deciding which checks run, in what order, for every tx** | **No**                       | **Yes — this is the ante chain's whole job**                |
+| Replay protection                      | Stores `sequence` only                          | `IncrementSequenceDecorator` actually bumps it              |
+| Auto-create / fee policy / size limits | Not opinionated                                 | Chain-specific decorators (`AutoCreate`, `DeductFee`, etc.) |
+
+In short: `x/auth` is a **library**; the ante chain is the **policy** that says when and how the library gets called.
+
+---
+
+## 4. How signature verification actually works
+
+### 4.1 What the client signs
+
+The wallet (Keplr, the cosmos-exec Go SDK signer, etc.) builds a `SignDoc` containing four fields:
+
+| Field             | Source                                          |
+| ----------------- | ----------------------------------------------- |
+| `body_bytes`      | Messages + memo + timeout height                |
+| `auth_info_bytes` | Fee, gas limit, signer infos (pubkey + sequence)|
+| `chain_id`        | From `/status` (or hard-coded)                  |
+| `account_number`  | From `/auth/account/{addr}` (peeked, see §1.b)  |
+
+These four are concatenated and hashed; the wallet signs the digest with the private key. Signature + original `body_bytes` / `auth_info_bytes` are bundled into a `TxRaw` and submitted.
+
+**Critical:** the signature commits to `account_number` and `chain_id`. If the server rebuilds `SignDoc` with a different value for either, the signature won't verify — that's the failure mode `Peek` (§1.b) exists to prevent.
+
+### 4.2 What the server verifies
+
+Five decorators participate, each doing one focused job:
+
+1. **`SetPubKeyDecorator`** — for accounts with no pubkey on record yet, copy the pubkey from the tx's `SignerInfo` into the account and persist. (First-tx case: `AutoCreate` made the account but didn't know its pubkey; this step records it.)
+2. **`ValidateSigCountDecorator`** — caps the number of signatures per tx (DOS guard against pubkey arrays).
+3. **`SigGasConsumeDecorator`** — charges gas proportional to verification cost (multi-sig is more expensive than single-sig).
+4. **`SigVerificationDecorator`** — the actual crypto:
+   - Loads the account from `AccountKeeper`, reads stored `account_number` and current `sequence`.
+   - Rebuilds `SignDoc` with these server-side values + `chain_id`.
+   - Calls the sign-mode handler (`SIGN_MODE_DIRECT`, `SIGN_MODE_LEGACY_AMINO_JSON`, …) to recompute the digest.
+   - Verifies the digest against the supplied signature using the stored pubkey.
+   - Any mismatch — wrong account number, wrong sequence, wrong chain-id, swapped pubkey, tampered body — surfaces as `signature verification failed … unauthorized`.
+5. **`IncrementSequenceDecorator`** — bumps `sequence` by 1, so the same signed tx can't be replayed.
+
+Replay protection works because `(account_number, sequence)` is a one-shot pair: after `IncrementSequence` runs, re-submitting the same bytes will fail at step 4 (the server now rebuilds `SignDoc` with `sequence+1`, the digest no longer matches the old signature).
+
+### 4.3 Why none of these decorators are optional
+
+| Decorator omitted        | What breaks                                                       |
+| ------------------------ | ----------------------------------------------------------------- |
+| `SetPubKey`              | Sig verification fails — no pubkey to check against               |
+| `SigVerification`        | Anyone can forge a tx as anyone — no authentication at all        |
+| `IncrementSequence`      | One signed tx can be replayed forever                             |
+| `ValidateBasic`          | Malformed txs reach message execution and panic / burn gas        |
+| `ConsumeGasForTxSize`    | Free DOS via huge tx bodies                                       |
+| `DeductFee`              | (Fee-bearing chains only.) Free txs even when fees are required   |
+
+The master switch is `COSMOS_EXEC_ENFORCE_SIGNATURES`. When **off** (default for dev/tests), `app.go` skips `SetAnteHandler` entirely — no ante chain runs, unsigned txs are accepted. When **on**, the full chain above runs in `FinalizeBlock` and unsigned / invalid-sig txs are rejected. Production must set this to `true`.
+
+---
+
 ## End-to-end flow for a Keplr dApp
 
 ```

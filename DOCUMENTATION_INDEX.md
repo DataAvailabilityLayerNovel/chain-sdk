@@ -91,7 +91,6 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 | Script | Path | Dùng cho |
 |--------|------|----------|
 | **Run stack** | [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go) | Orchestrate sequencer+fullnode+exec |
-| **Contract helper** | [scripts/contracts/wasm-contract.sh](scripts/contracts/wasm-contract.sh) | Deploy, execute, query contract |
 | **RPC queries** | [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh) | Status, latest block, tx query |
 | **DA query** | [scripts/query_celestia_blob.sh](scripts/query_celestia_blob.sh) | Query DA blob by height |
 | **DA watch** | [scripts/watch_celestia_latest_blobs.sh](scripts/watch_celestia_latest_blobs.sh) | Real-time DA blob monitoring |

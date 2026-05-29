@@ -16,9 +16,8 @@ EV-node là nền tảng để chạy chain Cosmos + WASM trên DA layer (Celest
 - Go SDK cho dApp chain + WASM tx/query: [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md)
 - **CLI SDK (dal-sdk)**: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md)
 - Runner full stack: [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go)
-- Contract helper scripts:
-	- [scripts/contracts/wasm-contract.sh](scripts/contracts/wasm-contract.sh)
-	- [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh)
+- RPC block/tx helper: [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh)
+- Deploy / interact contract: dùng SDK Go ([apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md)) hoặc FE my-dapp-web ([frontend-integration.md](apps/cosmos-exec/sdk/cosmoswasm/docs/frontend-integration.md))
 - Chain SDK Go modules: [github.com/DataAvailabilityLayerNovel/chain-sdk](https://github.com/DataAvailabilityLayerNovel/chain-sdk)
 
 ## 2) Kiến trúc chain Cosmos trong repo
@@ -134,10 +133,7 @@ Xem chi tiết: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/da
 	- `./scripts/contracts/wasm-rpc.sh status`
 	- `./scripts/contracts/wasm-rpc.sh latest-block`
 	- `./scripts/contracts/wasm-rpc.sh tx --hash <HEX_TX_HASH>`
-- Contract flow:
-	- `./scripts/contracts/wasm-contract.sh deploy`
-	- `./scripts/contracts/wasm-contract.sh execute --contract <ADDR> --msg '<JSON>'`
-	- `./scripts/contracts/wasm-contract.sh query --contract <ADDR> --msg '<JSON>'`
+- Contract flow: dùng SDK Go ([getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md)) hoặc FE my-dapp-web — bash wrapper đã bỏ.
 - DA blob query/watch:
 	- `./scripts/query_celestia_blob.sh`
 	- `./scripts/query_celestia_blob_range.sh --from-height <N> --to-height <M>`

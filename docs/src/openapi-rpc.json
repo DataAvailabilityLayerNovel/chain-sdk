@@ -514,6 +514,90 @@
           }
         }
       }
+    },
+    "/evnode.v1.StoreService/GetGenesisDaHeight": {
+      "post": {
+        "tags": [
+          "Store Service"
+        ],
+        "summary": "Get genesis DA height",
+        "description": "Returns the DA layer height at which the first Evolve block was included. Useful for clients that need to start scanning the DA layer from the rollup's genesis blob.",
+        "operationId": "getGenesisDaHeight",
+        "requestBody": {
+          "description": "Empty request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Get genesis DA height",
+                  "value": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Genesis DA height returned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetGenesisDaHeightResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/evnode.v1.ConfigService/GetSignerInfo": {
+      "post": {
+        "tags": [
+          "Config Service"
+        ],
+        "summary": "Get signer info",
+        "description": "Returns information about the signer configured for this node, currently the signer address used to sign block headers.",
+        "operationId": "getSignerInfo",
+        "requestBody": {
+          "description": "Empty request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Get signer info",
+                  "value": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signer info returned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSignerInfoResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -1,0 +1,27 @@
+# Loại bỏ thứ không cần lúc build → nhanh hơn, image gọn hơn.
+.git
+.gitignore
+.github/
+**/.DS_Store
+
+# Build artifacts
+build/
+dist/
+**/*.test
+**/*.out
+coverage.out
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+
+# Local secrets / runtime
+**/.env
+**/.env.local
+.cosmos-exec-grpc/
+**/data/
+
+# Docs không ảnh hưởng binary
+**/*.md
+docs/

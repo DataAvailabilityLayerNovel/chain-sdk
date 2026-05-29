@@ -22,7 +22,96 @@ ev-node **tách ba việc này ra**, không gộp vào một validator set:
 
 Hệ quả mấu chốt: **sequencer không thể giả mạo state**. Nó chỉ ký `SignedHeader` rồi publish lên DA; full node khác chạy lại tx từ data blob, nếu `app_hash` không khớp thì block bị từ chối ngay. Bỏ validator set **không** đồng nghĩa "phải tin một bên về tính đúng".
 
-## 2. Hai chế độ sequencer
+## 2. Full node verify như thế nào — chi tiết kỹ thuật
+
+Sovereign verification ở section 1 chỉ là khẩu hiệu — đây là *từng bước cụ thể* một full node làm khi nhận được block. Mọi check đều **không tin sequencer**; sai bất kỳ bước nào → block bị reject, syncer dừng tại height đó và người vận hành biết ngay.
+
+### 2.1 Lấy block từ đâu
+
+Full node có 3 nguồn (`block/internal/syncing/`):
+
+| Nguồn | File | Vai trò |
+|---|---|---|
+| **DA layer** (Celestia) | `da_retriever.go`, `da_follower.go` | **Source of truth** — block chỉ được commit khi cả header và data blob đã trên DA |
+| **P2P gossip** | `p2p_handler.go` | Tăng tốc; nhận trước khi DA xác nhận nhưng vẫn phải đợi DA mới commit |
+| **Forced inclusion** | `block/internal/da/forced_inclusion_retriever.go` | Tx user gửi thẳng vào DA bypass sequencer |
+
+Nếu sequencer gossip P2P một block mà không publish DA → block không bao giờ advance trên full node.
+
+### 2.2 Validate header + data (chưa execute)
+
+`Syncer.ValidateBlock` ([block/internal/syncing/syncer.go:837](../../../../../block/internal/syncing/syncer.go#L837)) chạy 2 lớp check rẻ trước khi tốn CPU exec:
+
+**Lớp 1 — `SignedHeader.ValidateBasicWithData(data)`** ([types/signed_header.go:189](../../../../../types/signed_header.go#L189)):
+
+- Field hợp lệ: height > 0, time > 0, chain ID khớp.
+- **Chữ ký sequencer hợp lệ trên payload header** — sequencer không thể giả mạo header của người khác, và không ai khác có thể giả mạo header của sequencer.
+- `ProposerAddress == Signer.Address` (kẻ ký = kẻ tuyên bố là proposer).
+- `data.DACommitment() == header.DataHash` ([types/data.go:68-70](../../../../../types/data.go#L68-L70)) — data blob đúng là cái header cam kết. Sequencer **không thể** "header một đằng, data một nẻo".
+
+**Lớp 2 — `State.AssertValidForNextState(header, data)`** ([types/state.go:59](../../../../../types/state.go#L59)) — chuỗi liên tục:
+
+- `ChainID` khớp.
+- `Height == LastBlockHeight + 1` (không nhảy/lùi).
+- `Time >= LastBlockTime` (không lùi).
+- `LastHeaderHash == hash(header trước đó full node đã commit)` (chain liên tục, không fork).
+- **`header.AppHash == state.AppHash`** ([types/state.go:106-108](../../../../../types/state.go#L106-L108)) — chốt chống state-fork: nếu sequencer chạy nhánh state khác thì lệch ngay từ field này.
+
+Bước này không execute, chỉ so field. Chi phí thấp nên chạy đầu tiên.
+
+### 2.3 Execute lại tx → so AppHash
+
+Đây mới là phần "tự chạy state machine":
+
+```go
+// block/internal/syncing/syncer.go:807
+newAppHash := exec.ExecuteTxs(ctx, rawTxs, header.Height(), header.Time(), currentState.AppHash)
+```
+
+Trong cosmos-exec ([apps/cosmos-exec/executor/executor.go:326](../../../executor/executor.go#L326)) `ExecuteTxs`:
+
+1. Kiểm `prevStateRoot == e.stateRoot` — double-check chain liên tục ở tầng executor.
+2. Kiểm `blockHeight == lastHeight + 1`.
+3. `app.FinalizeBlock(...)` — chạy đầy đủ ante chain (verify sig, sequence, gas, DeductFee) + msg handler cho từng tx. **Same code path** mà sequencer dùng khi sản xuất block, nên kết quả deterministic.
+4. `app.Commit()` ghi IAVL, lấy `LastCommitID().Hash` làm `newAppHash` ([executor.go:403](../../../executor/executor.go#L403)).
+
+`newAppHash` được lưu vào `state.AppHash` của full node, **không** được so trực tiếp với `header.AppHash` của block N — vì sequencer ghi `header.AppHash` của block N = state SAU khi exec block N-1, chứ không phải sau N. Cơ chế thực sự là:
+
+- Block N đến → `state.AppHash` (full node) = AppHash sau block N-1 → so với `header.AppHash` của N → OK → execute → `state.AppHash` cập nhật thành AppHash sau N.
+- Block N+1 đến → `header.AppHash` (sequencer ghi) = AppHash sau N → so với `state.AppHash` (full node tự tính) = AppHash sau N → **đây là điểm phát hiện cheat**.
+
+Nếu sequencer cheat ở block N (ví dụ trừ phí sai, skip 1 tx, mint token lậu):
+
+- Full node exec lại → ra `newAppHash_real`.
+- Block N+1 đến mang `header.AppHash = newAppHash_cheat` (sequencer cam kết theo state nhánh giả).
+- `AssertValidSequence` so 2 giá trị → mismatch → trả `invalid last app hash` → block N+1 reject → **chain halt** ở full node.
+
+Sequencer **không thể** ép full node accept state giả — cùng lắm là làm full node treo cho tới khi có block đúng. Đây là ý nghĩa cụ thể của "sovereign".
+
+### 2.4 Audit forced-inclusion sau commit
+
+Ngay sau commit, syncer chạy thêm 1 check riêng cho censorship ([syncer.go:893](../../../../../block/internal/syncing/syncer.go#L893) `VerifyForcedInclusionTxs`):
+
+- Lấy danh sách tx đã publish vào forced-inclusion namespace trên DA trong epoch đã qua grace period.
+- Mỗi tx đó **phải** xuất hiện trong một block đã commit trước hạn (bất kỳ block nào).
+- Nếu sequencer skip tx forced-inclusion quá grace period → trả `errMaliciousProposer` ([syncer.go:851](../../../../../block/internal/syncing/syncer.go#L851)) → full node dừng chain.
+
+→ Censorship không bền vững được: hoặc sequencer include trong grace period, hoặc full node tự dừng và operator buộc phải xử lý.
+
+### 2.5 Bảng tóm tắt "ai check gì, fail trả lỗi gì"
+
+| Câu hỏi | Bằng chứng | Reject với lỗi |
+|---|---|---|
+| Header có đúng sequencer ký? | Verify chữ ký trên payload header | `ErrSignatureVerificationFailed` |
+| Data có khớp header? | `DACommitment(data) == header.DataHash` | `header-data validation failed` |
+| Có chèn lén / skip block? | `LastHeaderHash`, `Height == prev+1` | `invalid last header hash` / `invalid block height` |
+| Sequencer cheat state? | Re-execute → so AppHash ở block kế | `invalid last app hash` |
+| Sequencer censor? | Forced-inclusion audit qua epoch | `errMaliciousProposer` |
+| Data còn tồn tại? | Header + data đều phải on Celestia | DA fetch fail → block không advance |
+
+**Trust assumption duy nhất còn lại:** DA layer (Celestia) live và phục vụ data. Mất Celestia → không verify được nữa, nhưng kẻ tấn công cũng không lừa được state — chỉ là chain ngừng tiến.
+
+## 3. Hai chế độ sequencer
 
 ev-node hỗ trợ hai sequencer (xem `pkg/sequencers/single` và `pkg/sequencers/based`):
 
@@ -47,7 +136,7 @@ type NodeConfig struct {
 
 > **Based sequencer** chính là cách ev-node "bỏ luôn cả sequencer như một điểm tin": không có mempool, mọi tx phải đi qua DA, nên thứ tự do chính DA layer quyết. Đổi lại độ trễ cao hơn (chờ epoch DA) và không có mempool UX.
 
-## 3. Forced Inclusion — chống kiểm duyệt khi vẫn dùng single sequencer
+## 4. Forced Inclusion — chống kiểm duyệt khi vẫn dùng single sequencer
 
 Đây là cơ chế khiến single sequencer **không** thể kiểm duyệt vĩnh viễn tx của bạn.
 
@@ -81,7 +170,7 @@ Execution layer validate tx forced (skip validation cho tx mempool đã verified
 
 → Tức là kể cả single sequencer, người dùng luôn có "đường vòng" qua DA để ép tx vào chain. Censorship chỉ làm *chậm*, không *chặn vĩnh viễn*.
 
-## 4. Vậy "không có validator" mất gì?
+## 5. Vậy "không có validator" mất gì?
 
 | Rủi ro | Ảnh hưởng thực tế | Giảm nhẹ trong ev-node |
 |--------|-------------------|------------------------|
@@ -92,7 +181,7 @@ Execution layer validate tx forced (skip validation cho tx mempool đã verified
 
 **Không mất:** tính đúng của state (sovereign verification), bất biến lịch sử (DA).
 
-## 5. Liên hệ tới phí (0-fee) trên cosmos-exec
+## 6. Liên hệ tới phí (0-fee) trên cosmos-exec
 
 Vì không có validator set cần thưởng staking, stack cosmos-exec không bắt buộc phí. Lưu ý đúng theo code:
 
@@ -101,7 +190,7 @@ Vì không có validator set cần thưởng staking, stack cosmos-exec không b
 
 Đánh đổi: **0-fee = không có lớp chống spam kinh tế**. Phù hợp app sovereign/permissioned/dev. Muốn bật fee > 0 **không chỉ** là đổi `TxFeeChecker` — còn phải bật ante (bước 0) và thêm cơ chế faucet/cấp vốn (account mặc định số dư 0). Xem đầy đủ ở [fee-economics.md](fee-economics.md) mục 6 & 6b. Chi phí không biến mất hẳn — **operator rollup vẫn trả blob fee cho Celestia** khi publish data.
 
-## 6. Khi nào chọn gì (cho dApp của bạn)
+## 7. Khi nào chọn gì (cho dApp của bạn)
 
 - **Dev / demo / app sovereign nội bộ**: single sequencer + 0-fee. Đơn giản nhất, UX tốt nhất (vào là dùng, không phí). Chấp nhận sequencer là điểm tin về *liveness*.
 - **Cần chống kiểm duyệt mạnh / liveness cao**: bật `BasedSequencer = true`. Mất mempool UX và độ trễ cao hơn, đổi lấy không có điểm tin ordering.

@@ -237,76 +237,24 @@ H=$(grep -E 'evcosmos-sequencer.*da_height=' .logs/cosmos-wasm-chain.log | grep 
 
 ## 6) Deploy/submit/execute/query contract (full-stack)
 
-Script dùng:
+Bash wrapper `wasm-contract.sh` đã xoá. Dùng 1 trong 2 cách:
 
-```bash
-./scripts/contracts/wasm-contract.sh
-```
+- **SDK Go** — viết app `main.go` gọi `cosmoswasm.BuildStoreTx` / `BuildInstantiateTx` / `BuildExecuteTx` / `QuerySmart`. Xem [apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md) (full flow: compile `.wasm` → deploy → interact). Tóm tắt API: [apps/cosmos-exec/sdk/cosmoswasm/docs/README.md](apps/cosmos-exec/sdk/cosmoswasm/docs/README.md).
+- **Frontend `my-dapp-web`** — Keplr ký tx ở browser, POST `/tx/submit`. Xem [apps/cosmos-exec/sdk/cosmoswasm/docs/frontend-integration.md](apps/cosmos-exec/sdk/cosmoswasm/docs/frontend-integration.md).
 
-Các lệnh chạy ngay:
-
-```bash
-# deploy (store + instantiate), tự lưu CONTRACT_ADDR vào DEPLOY_OUTPUT_FILE
-./scripts/contracts/wasm-contract.sh deploy
-
-# submit raw tx (base64)
-./scripts/contracts/wasm-contract.sh submit --tx-base64 <TX_BASE64>
-
-# execute contract
-./scripts/contracts/wasm-contract.sh execute --contract <CONTRACT_ADDR> --msg '{"transfer":{"recipient":"cosmos1...","amount":"1"}}'
-
-# query smart contract
-./scripts/contracts/wasm-contract.sh query --contract <CONTRACT_ADDR> --msg '{"balance":{"address":"cosmos1..."}}'
-```
-
-Mẫu đầy đủ đã test: submit tx rồi query tx đó
-
-Lưu ý khi chạy trên `zsh`:
-
-- Nếu paste cả block có dòng comment bắt đầu bằng `#`, `zsh` có thể báo `command not found: #` (và lỗi phụ như `unknown file attribute: b`).
-- Cách 1: bật comment mode trước khi paste: `setopt interactivecomments`
-- Cách 2: dùng block không comment bên dưới.
-
-```bash
-./scripts/contracts/wasm-contract.sh deploy
-
-source /tmp/ev-node-wasm/last-deploy.env
-
-SENDER=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx default-sender)
-
-TX_BASE64=$(cd ./apps/cosmos-exec && go run ./cmd/cosmos-wasm-tx execute \
-	--sender "$SENDER" \
-	--contract "$CONTRACT_ADDR" \
-	--msg '{"transfer":{"recipient":"'"$CONTRACT_ADDR"'","amount":"1"}}' \
-	--out base64)
-
-SUBMIT_JSON=$(./scripts/contracts/wasm-contract.sh submit --tx-base64 "$TX_BASE64")
-echo "$SUBMIT_JSON"
-
-TX_HASH=$(echo "$SUBMIT_JSON" | jq -r '.hash')
-./scripts/contracts/wasm-rpc.sh tx --hash "$TX_HASH"
-```
-
-Nếu vừa submit mà `tx --hash` trả `found:false`, thường là tx chưa được index hoặc node chưa chạy đúng RPC. Retry nhanh:
-
-```bash
-for i in {1..10}; do ./scripts/contracts/wasm-rpc.sh tx --hash "$TX_HASH" && break; sleep 2; done
-```
-
-Ví dụ hash thực tế từ lần test gần nhất:
-
-```bash
-./scripts/contracts/wasm-rpc.sh tx --hash 489cff18c1e56d2a112f35086bb148de84d445049dd96744937aa60984d254cf
-```
-
-Config endpoint contract API:
+Endpoint backend:
 
 - `COSMOS_EXEC_API_URL` (mặc định: `http://127.0.0.1:50051`)
+- Submit tx: `POST /tx/submit` (body: `{"tx_base64": "..."}` hoặc `{"tx_hex": "..."}`)
+- Tra kết quả: `GET /tx/result?hash=...`
+- Query contract: `POST /query/smart` (body: `{"contract": "...", "msg": <json>}`)
+
+Để tra block/tx qua ev-node RPC vẫn dùng `wasm-rpc.sh` (xem mục 4 ở trên).
 
 ## 7) Lưu ý vận hành
 
 - Nếu `wasm-rpc.sh status` báo `connection refused`, nghĩa là stack chưa chạy hoặc chưa listen ở `:38331`.
-- Nếu `wasm-contract.sh` báo lỗi connect `:50051`, nghĩa là execution backend chưa chạy.
+- Nếu submit/query backend báo lỗi connect `:50051`, nghĩa là execution backend (`cosmos-exec-grpc`) chưa chạy.
 - Nếu thấy lỗi DA submit trực tiếp từ `evcosmos` kiểu `insufficient funds ... utia`, cần nạp thêm phí cho address submit lên Celestia.
 - Dù vậy, sidecar Engram vẫn có thể hoạt động nếu log còn `engram_submit ... status=200`.
 

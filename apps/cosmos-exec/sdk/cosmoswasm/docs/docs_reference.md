@@ -2,6 +2,7 @@
 
 | File | What's inside |
 |------|---------------|
+| [Overview / README](README.md) | Bắt đầu ở đây: SDK dành cho 3 nhóm (contract dev / FE dev / node operator) + function map toàn bộ public API |
 | [Getting Started](getting-started.md) | End-to-end: compile .wasm → start chain → deploy contract → interact via SDK |
 | [Architecture](architecture.md) | Project structure: every folder/file, data flow, key interfaces |
 | [Configuration](configuration.md) | All SDK + server config fields, env vars, dev/staging/prod profiles |

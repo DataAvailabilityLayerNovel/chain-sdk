@@ -1,5 +1,27 @@
 //go:build run_cosmos_wasm
 
+// run-cosmos-wasm-nodes là orchestrator dev/local: dựng full stack rollup
+// (sequencer + full node + 2 execution service gRPC) trên cùng host và đẩy
+// log ra cả stdout lẫn .logs/cosmos-wasm-chain.log.
+//
+// Build tag `run_cosmos_wasm` đảm bảo file không lẫn vào `go build ./...`
+// — chỉ chạy qua: `go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go`.
+//
+// Trình tự khởi tạo (run()):
+//   1. findProjectRoot      — đi ngược tìm thư mục có go.mod + apps/
+//   2. loadDotEnv           — đọc .env (DA endpoint, namespace, token...)
+//   3. resolveDAFromEnv     — map env → runConfig
+//   4. validateDAConfig     — bắt buộc có DA endpoint & namespace
+//   5. preflightDA          — POST blob.GetAll thử để fail-fast nếu DA chết/sai token
+//   6. preparePaths         — tạo home dir, passphrase, log file (+ clean nếu cần)
+//   7. ensurePortsAvailable — kiểm tra 6 cổng (2 nodes × {gRPC, RPC, P2P}) còn rảnh
+//   8. ensureBinaries       — go build evcosmos + cosmos-exec-grpc (incremental)
+//   9. initNodes            — `evcosmos init` cho mỗi node + copy genesis từ seq sang full
+//  10. startExecutionServices — bật 2 cosmos-exec-grpc, chờ TCP + grace gRPC handler
+//  11. startSequencer       — bật evcosmos aggregator, lấy peer addr qua `net-info`
+//  12. startFullNode        — bật evcosmos non-aggregator, peer = sequencer
+//  13. waitForChainSync     — 5 phút chờ full node đuổi kịp seq (≤10 block); chỉ warn nếu fail
+//  14. monitorProcesses     — block đến khi 1 process chết hoặc nhận SIGINT/SIGTERM
 package main
 
 import (
@@ -25,17 +47,23 @@ import (
 	"time"
 )
 
+// Port mặc định cho 2 node trên cùng host. Chọn lệch dải để tránh đụng các
+// service khác trong repo (testapp RPC 7331, evm-nodes...). Đổi ở đây thì
+// phải khớp với các doc và devchain helper trong sdk/cosmoswasm/internal/devchain.
 const (
-	defaultSeqExecPort  = 50051
-	defaultFullExecPort = 50052
+	defaultSeqExecPort  = 50051 // cosmos-exec-grpc của sequencer (gRPC executor URL)
+	defaultFullExecPort = 50052 // cosmos-exec-grpc của full node
 
-	defaultSeqRPCPort  = 38331
-	defaultFullRPCPort = 48331
+	defaultSeqRPCPort  = 38331 // evcosmos JSON-RPC sequencer (sequencer truy vấn /status)
+	defaultFullRPCPort = 48331 // evcosmos JSON-RPC full node
 
-	defaultSeqP2PPort  = 7860
-	defaultFullP2PPort = 7861
+	defaultSeqP2PPort  = 7860 // libp2p sequencer (full node sẽ dial vào đây)
+	defaultFullP2PPort = 7861 // libp2p full node
 )
 
+// nodeConfig: 1 entry/node. homeDir là `evcosmos` home, execHomeDir là `cosmos-exec-grpc` home.
+// Tách 2 home dir vì state tier (chain state, mempool) và execution tier (wasm vm, kvstore)
+// sống độc lập — clean 1 bên không động bên kia.
 type nodeConfig struct {
 	name         string
 	isSequencer  bool
@@ -46,6 +74,9 @@ type nodeConfig struct {
 	p2pPort      int
 }
 
+// runConfig: gom flag CLI + env vào 1 struct, không truyền lẻ tẻ qua các method.
+// Một số field (daSubmitAddress, uploadNamespace, submitAPI, submitInterval) hiện chỉ
+// dùng để log/diagnostic — DA submission thật do evnode runtime tự xử lý qua --evnode.da.*.
 type runConfig struct {
 	chainID         string
 	cleanOnStart    bool
@@ -68,6 +99,9 @@ type processHandle struct {
 	cmd  *exec.Cmd
 }
 
+// nodeManager là singleton điều phối toàn stack. ctx/cancel propagate xuống mọi
+// exec.CommandContext nên khi nhận SIGINT thì tất cả child process tự nhận
+// context cancel — cleanup() chỉ còn gửi SIGTERM phòng trường hợp process bướng.
 type nodeManager struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -200,12 +234,16 @@ func (nm *nodeManager) run() error {
 	return nm.monitorProcesses()
 }
 
+// preparePaths: dựng home dir cho 2 node + 2 exec service, file passphrase chung,
+// log file append-only. Nếu cleanOnStart thì xóa toàn bộ state cũ trước — bắt buộc
+// khi đổi chain_id, genesis, hoặc bật A+B treasury (xem docs/fee-economics.md mục 6b).
 func (nm *nodeManager) preparePaths() error {
 	tmpDir := filepath.Join(nm.projectRoot, ".cosmos-wasm-runner")
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return fmt.Errorf("create runner temp dir: %w", err)
 	}
 
+	// Passphrase dev cố định "secret" — chỉ dùng local, KHÔNG đem lên môi trường thật.
 	nm.passphraseFile = filepath.Join(tmpDir, "passphrase.txt")
 	if err := os.WriteFile(nm.passphraseFile, []byte("secret\n"), 0o600); err != nil {
 		return fmt.Errorf("write passphrase file: %w", err)
@@ -252,6 +290,9 @@ func (nm *nodeManager) preparePaths() error {
 	return nil
 }
 
+// ensurePortsAvailable: fail-fast preflight. Listen+close từng port để biết có
+// process khác (vd lần chạy trước chưa kill sạch) đang giữ — báo lỗi ngay thay vì
+// để evcosmos/cosmos-exec-grpc crash giữa chừng với log khó đọc.
 func (nm *nodeManager) ensurePortsAvailable() error {
 	ports := make([]int, 0, len(nm.nodes)*3)
 	for _, node := range nm.nodes {
@@ -270,6 +311,9 @@ func (nm *nodeManager) ensurePortsAvailable() error {
 	return nil
 }
 
+// ensureBinaries: build evcosmos + cosmos-exec-grpc vào ./build/. Luôn gọi
+// `go build` để pick up source change; Go's incremental build làm trường hợp
+// no-op gần như free.
 func (nm *nodeManager) ensureBinaries() error {
 	type buildTarget struct {
 		binPath string
@@ -310,10 +354,24 @@ func (nm *nodeManager) ensureBinaries() error {
 	return nil
 }
 
+// initNodes: chạy `evcosmos init` cho cả 2 node. Sau đó copy genesis.json từ
+// sequencer sang full node — phải cùng genesis nếu không hai bên sẽ tính state
+// root lệch và full node reject mọi block của sequencer.
+//
+// Khi --clean-on-start=false và signer.json của node đã tồn tại thì skip init
+// (`evcosmos init` sẽ fail nếu signer.json đã có). Riêng full node init với
+// aggregator=false vẫn tạo 1 genesis.json với proposer_address=null vì không có
+// signer — luôn phải đè bằng genesis của sequencer ở dưới, không skip copy.
 func (nm *nodeManager) initNodes() error {
 	evcosmos := filepath.Join(nm.binariesDir, "evcosmos")
 
 	for _, node := range nm.nodes {
+		signerPath := filepath.Join(node.homeDir, "config", "signer.json")
+		if _, err := os.Stat(signerPath); err == nil {
+			log.Printf("Skipping init for %s: signer already present at %s", node.name, signerPath)
+			continue
+		}
+
 		args := []string{
 			"init",
 			"--home", node.homeDir,
@@ -339,6 +397,12 @@ func (nm *nodeManager) initNodes() error {
 	return nil
 }
 
+// startExecutionServices: bật cosmos-exec-grpc cho mỗi node TRƯỚC khi bật evcosmos.
+// evcosmos sẽ dial vào URL gRPC này (--grpc-executor-url) trong startSequencer/Full;
+// nếu exec service chưa sẵn sàng thì evcosmos retry-fail.
+//
+// Hai bước chờ: waitForTCP (port mở) + waitForGRPCHealthy (handler init xong).
+// Cần cả hai vì process có thể đã bind port nhưng gRPC service chưa register handler.
 func (nm *nodeManager) startExecutionServices() error {
 	binary := filepath.Join(nm.binariesDir, "cosmos-exec-grpc")
 
@@ -364,6 +428,9 @@ func (nm *nodeManager) startExecutionServices() error {
 	return nil
 }
 
+// startSequencer: bật evcosmos với aggregator=true. Sau khi RPC sẵn sàng, gọi
+// `evcosmos net-info` để lấy multiaddr libp2p của sequencer; full node sẽ dial
+// vào đây qua --evnode.p2p.peers (xem startFullNode).
 func (nm *nodeManager) startSequencer() error {
 	node := nm.nodes[0]
 	args := []string{
@@ -401,6 +468,8 @@ func (nm *nodeManager) startSequencer() error {
 	return nil
 }
 
+// startFullNode: bật evcosmos với aggregator=false, peers = sequencer multiaddr.
+// Full node không tạo block, chỉ subscribe gossip + replay DA + verify state.
 func (nm *nodeManager) startFullNode() error {
 	node := nm.nodes[1]
 	args := []string{
@@ -431,13 +500,14 @@ func (nm *nodeManager) startFullNode() error {
 	return nil
 }
 
+// waitForChainSync: smoke test. Đợi tới 5 phút để full node lọt vào sync window
+// (≤10 block lag). Cố ý KHÔNG fatal khi timeout — chỉ log WARN rồi cho stack
+// chạy tiếp, để user còn vào RPC/log mà chẩn đoán nguyên nhân chậm (DA chết,
+// peer dial fail, blob backpressure...).
 func (nm *nodeManager) waitForChainSync() error {
 	seqURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[0].rpcPort)
 	fullURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[1].rpcPort)
 
-	// Wait up to 5 minutes for sequencer + fullnode to enter the sync window.
-	// On failure we warn and continue instead of killing the stack — so the user
-	// can inspect logs / RPCs to figure out what's slow.
 	deadline := time.Now().Add(5 * time.Minute)
 	lastSeq, lastFull := int64(0), int64(0)
 	for time.Now().Before(deadline) {
@@ -476,6 +546,9 @@ func (nm *nodeManager) getNodePeerAddress(home string) (string, error) {
 	return match, nil
 }
 
+// monitorProcesses: 1 goroutine/child Wait(); process chết bất thường thì cancel
+// ctx kéo toàn stack xuống cùng (fail-fast — tránh trạng thái half-up khó debug).
+// SIGINT/SIGTERM bên ngoài đi qua nm.cancel() ở main → ctx.Done() chặn ở select.
 func (nm *nodeManager) monitorProcesses() error {
 	errCh := make(chan error, len(nm.processes))
 	for _, p := range nm.processes {
@@ -518,6 +591,10 @@ func (nm *nodeManager) validateDAConfig() error {
 	return nil
 }
 
+// preflightDA: gọi thử `blob.GetAll` ở height=1 với namespace dummy để xác nhận
+// (a) endpoint sống, (b) auth token hợp lệ, (c) token có quyền read. Bắt lỗi
+// 401/permission-denied sớm — nếu để evcosmos tự fail thì log gây rối, mất 30-60s
+// trước khi rõ nguyên nhân.
 func (nm *nodeManager) preflightDA() error {
 	payload := `{"jsonrpc":"2.0","id":1,"method":"blob.GetAll","params":[1,["AAAAAAAAAAAAAAAAAAAAAAAAAAECAwQFBgcICRA="]]}`
 	req, err := http.NewRequestWithContext(nm.ctx, http.MethodPost, nm.cfg.daAddress, strings.NewReader(payload))
@@ -577,6 +654,9 @@ func (nm *nodeManager) startProcess(name string, cmd *exec.Cmd) error {
 	return nil
 }
 
+// cleanup: 2 pha — SIGTERM cho mọi child, đợi 800ms, rồi SIGKILL những đứa còn
+// sống. Chạy qua defer trong main() nên luôn được gọi (kể cả khi run() lỗi giữa
+// chừng). cleanOnExit chỉ xóa home dir, không động .env hay binary.
 func (nm *nodeManager) cleanup() {
 	nm.cancel()
 
@@ -640,6 +720,10 @@ func (nm *nodeManager) writeLogLine(line string) {
 	}
 }
 
+// emitBlobHeightHint: parse log của evcosmos để rút ra DA blob height và in
+// hint cho user. Có deduplicate (lastBlobHeight) để không spam khi cùng 1 height
+// được nhắc nhiều lần. Mục đích: lúc dev muốn verify blob trên Celestia thì
+// biết ngay height nào để query (xem scripts/query_celestia_blob.sh).
 func (nm *nodeManager) emitBlobHeightHint(source, line string) {
 	if strings.Contains(line, "engram_submit") && !strings.Contains(line, "da_height=") {
 		nm.writeLogLine("[runner][blob-height] engram_submit acknowledged (status=200) but DA blob height is not provided by this API")
@@ -711,6 +795,9 @@ func (nm *nodeManager) logLatestBlobHeightHint() {
 	log.Printf("[runner][blob-height] tip: ./scripts/query_celestia_blob.sh --height %d", blobHeight)
 }
 
+// resolveDAFromEnv: map env DA_*/ENGRAM_*/COSMOS_DA_* → runConfig.
+// DA_BRIDGE_RPC ưu tiên hơn DA_RPC (bridge node có public RPC; light node thường không).
+// DA_NAMESPACE default "rollup" cho khớp engram-api convention.
 func (nm *nodeManager) resolveDAFromEnv() {
 	bridgeRPC := firstNonEmpty(os.Getenv("DA_BRIDGE_RPC"), os.Getenv("DA_RPC"))
 	submitRPC := firstNonEmpty(os.Getenv("DA_BRIDGE_RPC"), os.Getenv("DA_RPC"))
@@ -724,6 +811,9 @@ func (nm *nodeManager) resolveDAFromEnv() {
 	nm.cfg.daSubmitAddress = submitRPC
 }
 
+// loadDotEnv: minimal .env parser (chấp nhận `export FOO=bar`, comment #...,
+// quote " ' bao value). Không overwrite biến đã set ở shell — env shell luôn thắng.
+// Cố ý không dùng godotenv để giữ script này zero-dep (chỉ stdlib).
 func loadDotEnv(path string) error {
 	bz, err := os.ReadFile(path)
 	if err != nil {
@@ -893,6 +983,9 @@ func fetchLatestHeight(statusURL string) (int64, error) {
 	return height, nil
 }
 
+// findProjectRoot: đi ngược từ cwd lên đến khi gặp thư mục có cả go.mod VÀ apps/.
+// Check 2 điều kiện vì repo này multi-module — go.mod có ở nhiều nơi (apps/cosmos-exec,
+// apps/testapp...), chỉ root mới có thêm thư mục apps/.
 func findProjectRoot() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {

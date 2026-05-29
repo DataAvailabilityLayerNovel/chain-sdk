@@ -263,12 +263,53 @@ cd my-dapp-web && npm run dev   # mở /explorer, connect Keplr, bấm nút
 
 ---
 
+<a id="sweep-phi-cuoi-block"></a>
+## 6d. Sweep phí cuối block về treasury (thay cho `x/distribution`)
+
+> **Trạng thái:** đã implement, **opt-in qua env**. Không set → no-op, phí ở lại `fee_collector` (đúng mặc định dev).
+
+Trong app-chain Cosmos truyền thống, phí trong `fee_collector` được module `x/distribution` chia cho validator set theo voting power. Sovereign rollup này **không có validator set**, nên `x/distribution` (cùng `x/staking` mà nó phụ thuộc) cũng không được nạp. Hệ quả là `fee_collector` phình mãi nếu không có cơ chế khác.
+
+Giải pháp gọn nhẹ trong code hiện tại: `App.EndBlocker` ([`app/app.go:365-399`](../../../app/app.go#L365-L399)) gọi `sweepFeesToTreasury` *sau* `ModuleManager.EndBlock`. Hàm này quét **toàn bộ** balance của `fee_collector` về địa chỉ treasury cấu hình tĩnh qua env.
+
+### Bật
+
+```bash
+export COSMOS_EXEC_TREASURY_ADDR=cosmos1...   # bech32 — không set / sai format → no-op
+```
+
+Treasury có thể là EOA, multisig, hay địa chỉ contract CosmWasm — chain không quan tâm, chỉ gọi `BankKeeper.SendCoinsFromModuleToAccount`.
+
+### Cơ chế
+
+| Bước | Hành động |
+|------|-----------|
+| 1 | `ModuleManager.EndBlock` chạy xong (mọi module có thể mint thêm vào `fee_collector`) |
+| 2 | `treasuryAddrFromEnv()` parse `COSMOS_EXEC_TREASURY_ADDR`; rỗng/sai → return nil → no-op |
+| 3 | `BankKeeper.GetAllBalances(feeCollector)` → balance toàn bộ trong block |
+| 4 | `BankKeeper.SendCoinsFromModuleToAccount(FeeCollectorName, treasury, balance)` |
+| 5 | Trả về `EndBlock` response cho ABCI |
+
+### Lưu ý vận hành
+
+- **Đồng bộ giữa các node:** `COSMOS_EXEC_TREASURY_ADDR` là đầu vào của state transition — sequencer và full node phải set **cùng giá trị**, lệch sẽ làm `app_hash` divergent và rollup fork. Cùng ràng buộc với `COSMOS_EXEC_MIN_GAS_PRICE` / `COSMOS_EXEC_GAS_DENOM` ([`ante.go:45-67`](../../../app/ante.go#L45-L67)).
+- **Khác với `COSMOS_EXEC_TREASURY_PRIVKEY_HEX`:** `_ADDR` chỉ là *đích* nhận phí (public bech32, không cần private key). `_PRIVKEY_HEX` là ví ký faucet (mục 6b). Hai biến độc lập — có thể bật một, cả hai, hoặc không bật cái nào.
+- **Mô hình treasury-DAO:** vì treasury chỉ cần là một địa chỉ, có thể trỏ về một contract CosmWasm chứa multisig / time-lock / governance logic mà không phải sửa chain.
+- **Không atomic với fee deduction:** phí được `DeductFeeDecorator` đẩy vào `fee_collector` *trong* khi tx chạy; sweep xảy ra ở `EndBlocker` *sau* khi mọi tx của block đã chạy. Trong cùng một block, treasury vẫn nhận đủ tổng phí.
+
+### Vì sao không dùng `x/distribution`?
+
+`x/distribution` đòi `x/staking` (đọc validator set, voting power, delegations) → kéo theo hàng nghìn dòng state schema, query/msg handlers, genesis exporter — không ý nghĩa cho rollup single-sequencer. Pattern sweep chỉ tốn ~30 dòng Go (kèm cả comment + validate), và cho phép treasury được kiểm soát bởi cơ chế tuỳ ý (multisig, contract) thay vì validator set.
+
+---
+
 ## 7. Checklist khi đưa lên production có fee
 
 - [ ] **Bước 0**: set `COSMOS_EXEC_ENFORCE_SIGNATURES=true` (không có thì ante không chạy → fee không enforce được).
 - [ ] **Bước 1**: set `COSMOS_EXEC_TIA_PER_BYTE` / `MIN_GAS_PRICE` / `GAS_DENOM`; xác nhận `/tx/estimate` ra số đúng.
 - [ ] **Bước 2**: đã implement — chỉ cần `COSMOS_EXEC_MIN_GAS_PRICE` > 0 (bước 1); test tx trả thiếu bị từ chối `ErrInsufficientFee` trong CheckTx.
 - [ ] **Bước 3 (faucet)**: set `COSMOS_EXEC_TREASURY_PRIVKEY_HEX` (+ tùy chỉnh amount/cooldown) để bật A+B (mục 6b); test `GET /faucet?addr=...` rồi xác nhận địa chỉ có số dư trả phí được.
+- [ ] **Sweep phí (mục 6d)**: set `COSMOS_EXEC_TREASURY_ADDR` để phí không tích luỹ vô hạn trong `fee_collector`. Đảm bảo **mọi node** (sequencer + full node) set cùng giá trị, nếu không sẽ fork.
 - [ ] Denom `TREASURY_AMOUNT`/`FAUCET_AMOUNT` khớp `GAS_DENOM`.
 - [ ] Treasury key qua env/KMS; cân nhắc pattern sub-treasury (hot key hạn mức nhỏ).
 - [ ] Đo blob size **thật** (header + data) trên tải dự kiến — đừng đoán.
@@ -299,6 +340,7 @@ cd my-dapp-web && npm run dev   # mở /explorer, connect Keplr, bấm nút
 | A — genesis balances (treasury) | `apps/cosmos-exec/app/genesis.go` (`GenesisWithBalances`), `executor.WithGenesis` |
 | B — faucet endpoint + env | `apps/cosmos-exec/cmd/cosmos-exec-grpc/faucet.go` (`/faucet`) |
 | Ký MsgSend cho faucet | `apps/cosmos-exec/sdk/cosmoswasm/faucet_tx.go` (`BuildSignedBankSend`) |
+| Sweep phí cuối block về treasury | `apps/cosmos-exec/app/app.go` (`sweepFeesToTreasury`), `apps/cosmos-exec/app/ante.go` (`treasuryAddrFromEnv`) |
 | Lazy / block time / based flags | `pkg/config/config.go`, `pkg/config/defaults.go` |
 | DA submit (blob lên Celestia) | `block/internal/submitting/submitter.go` |
 | Sequencer & mô hình bảo mật | [sequencer-security.md](sequencer-security.md) |

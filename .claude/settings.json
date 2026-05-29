@@ -65,7 +65,8 @@
       "Skill(ev-node-explainer:*)",
       "Bash(gofmt -l app/genesis.go executor/genesis_balance_test.go cmd/cosmos-exec-grpc/faucet.go sdk/cosmoswasm/faucet_tx.go)",
       "Bash(gofmt -w cmd/cosmos-exec-grpc/faucet.go)",
-      "Bash(gofmt -l cmd/cosmos-exec-grpc/faucet.go)"
+      "Bash(gofmt -l cmd/cosmos-exec-grpc/faucet.go)",
+      "Read(//Users/nguyennganha/code/my-dapp/**)"
     ],
     "additionalDirectories": [
       "/tmp",
@@ -73,7 +74,8 @@
       "/Users/nguyennganha/code/my-dapp-web/src/lib",
       "/Users/nguyennganha/code/my-dapp-web/src/components",
       "/Users/nguyennganha/code/my-dapp-web",
-      "/Users/nguyennganha/code/my-dapp-web/src/app/explorer/tx"
+      "/Users/nguyennganha/code/my-dapp-web/src/app/explorer/tx",
+      "/Users/nguyennganha/code/my-dapp"
     ]
   }
 }

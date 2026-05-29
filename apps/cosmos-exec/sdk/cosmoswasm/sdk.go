@@ -1,6 +1,15 @@
 // Package cosmoswasm is the Chain SDK for building app-chains on the ev-node
 // modular rollup framework with Celestia DA.
 //
+// VI (tóm tắt): SDK Go giúp dApp build & gửi tx tới chain cosmos-exec, đồng
+// thời upload "blob" dữ liệu off-chain lên DA (Celestia) và ghi commitment
+// on-chain. Chia 3 tầng API:
+//   - Tier 1 (Core): NewClient / Submit / Query — dùng cho mọi app.
+//   - Tier 2 (Power-user): BuildTx, Namespace, Merkle, Chunk — khi cần kiểm
+//     soát sâu.
+//   - Tier 3 (Dev tooling): Mock, DALChain local — chỉ dùng cho test.
+// File này chỉ chứa documentation comment, không có code chạy.
+//
 // # API Tiers
 //
 // The SDK surface is divided into three tiers. When writing application code,
