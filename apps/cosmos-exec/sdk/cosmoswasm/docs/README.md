@@ -17,15 +17,15 @@ Có 3 nhóm user, mỗi nhóm chỉ cần đọc một nhánh nhỏ trong docs:
 Người viết smart contract (Rust → `.wasm`), backend service ghi/đọc state, batch event lên DA.
 
 - **Mục tiêu:** store code, instantiate, execute, query, submit blob, commit Merkle root.
-- **Đọc theo thứ tự:** [getting-started.md](getting-started.md) → [api-reference.md](api-reference.md) → [error-handling.md](error-handling.md) → [fee-economics.md](fee-economics.md).
-- **Function chính:** `NewClient`, `BuildStoreTx`, `BuildInstantiateTx`, `BuildExecuteTx`, `SubmitTxBytes`, `WaitTxResult`, `QuerySmart`, `SubmitBlob`, `CommitRoot`, `NewBatchBuilder`. Xem mục [Function map](#function-map) bên dưới.
+- **Đọc theo thứ tự:** [getting-started.md](getting-started.md) → [api-reference.md](api-reference.md) → [blob-first.md](blob-first.md) (lưu data lớn off-chain) → [error-handling.md](error-handling.md) → [fee-economics.md](fee-economics.md).
+- **Function chính:** `NewClient`, `BuildStoreTx`, `BuildInstantiateTx`, `BuildExecuteTx`, `SubmitTxBytes`, `WaitTxResult`, `QuerySmart`, và `NewBlobClient` → `SubmitBlob` / `SubmitBatch` / `RetrieveBlob` cho blob-first DA. Xem mục [Function map](#function-map) bên dưới.
 
 ### 2. Frontend Dev — dApp web nói chuyện với rollup
 
 Người build UI (Next.js/React) cho user cuối: connect Keplr, ký tx, hiển thị block/tx, faucet.
 
 - **Mục tiêu:** ký tx ở browser, submit qua HTTP, đọc account/balance/block.
-- **Đọc theo thứ tự:** [frontend-integration.md](frontend-integration.md) → [auto-account-creation.md](auto-account-creation.md) → [api-reference.md](api-reference.md) (chỉ section *Transaction APIs* + *Query APIs*).
+- **Đọc theo thứ tự:** [frontend-integration.md](frontend-integration.md) → [frontend-usecases.md](frontend-usecases.md) (call graph theo từng use case) → [auto-account-creation.md](auto-account-creation.md) → [api-reference.md](api-reference.md) (chỉ section *Transaction APIs* + *Query APIs*).
 - **Lưu ý:** FE không import SDK Go trực tiếp — gọi HTTP endpoint của `cosmos-exec-grpc` (qua Next.js proxy). SDK Go phía backend dùng để encode tx khi cần, hoặc làm faucet/indexer.
 
 ### 3. Node Operator — chạy sequencer / full node

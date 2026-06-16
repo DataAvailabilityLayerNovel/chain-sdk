@@ -66,7 +66,10 @@
       "Bash(gofmt -l app/genesis.go executor/genesis_balance_test.go cmd/cosmos-exec-grpc/faucet.go sdk/cosmoswasm/faucet_tx.go)",
       "Bash(gofmt -w cmd/cosmos-exec-grpc/faucet.go)",
       "Bash(gofmt -l cmd/cosmos-exec-grpc/faucet.go)",
-      "Read(//Users/nguyennganha/code/my-dapp/**)"
+      "Read(//Users/nguyennganha/code/my-dapp/**)",
+      "Bash(plantuml -tpng -o ../out src/*.plantuml)",
+      "Bash(docker info *)",
+      "Bash(docker system *)"
     ],
     "additionalDirectories": [
       "/tmp",

@@ -196,6 +196,55 @@ Vì không có validator set cần thưởng staking, stack cosmos-exec không b
 - **Cần chống kiểm duyệt mạnh / liveness cao**: bật `BasedSequencer = true`. Mất mempool UX và độ trễ cao hơn, đổi lấy không có điểm tin ordering.
 - **Public, giá trị cao**: single sequencer + forced inclusion bật sẵn + thêm fee token thật + kế hoạch multi-sequencer/failover.
 
+## 8. Câu hỏi thường gặp — EVM có validator không? Cosmos ABCI có còn CometBFT không?
+
+Hai cách hiểu sai phổ biến nhất khi tiếp cận stack này. Cùng một câu trả lời: **không, ev-node tự đóng vai consensus, không có process validator/CometBFT nào chạy** — nhưng cơ chế thực hiện ở hai backend khác nhau.
+
+### 8.1 EVM backend — không có validator
+
+[execution/evm/execution.go](https://github.com/evstack/ev-node/blob/main/execution/evm/execution.go) chỉ giao tiếp với một Ethereum execution client (Geth/Reth/Erigon) qua **Engine API**. Đây đúng cách Ethereum hậu-Merge tách execution layer khỏi consensus layer — nhưng "CL" trong stack này là ev-node sequencer chứ không phải Beacon chain.
+
+| Quan sát | Bằng chứng |
+|----------|-----------|
+| Không có khái niệm validator | Grep `validator` trong `execution/evm/execution.go`: 0 kết quả thuộc về cấu trúc consensus |
+| Single aggregator, không có set | [apps/evm/cmd/init.go:61](https://github.com/evstack/ev-node/blob/main/apps/evm/cmd/init.go#L61) — `CreateSigner(...)` sinh **một** `proposerAddress` |
+| Finality là mock theo offset | `SafeBlockLag = 2`, `FinalizedBlockLag = 3` trong `execution.go` — comment ghi rõ *"temporary mock value until proper DA-based finalization is wired up"* |
+| Không có BFT vote | Block hợp lệ khi Engine API trả `VALID`, không cần ⅔ ai cả |
+
+### 8.2 Cosmos ABCI backend — không chạy CometBFT process
+
+App Cosmos SDK **import** `github.com/cometbft/cometbft/abci/types` (xem [apps/cosmos-exec/app/app.go:17](../../app/app.go#L17), [executor/executor.go:15](../../executor/executor.go#L15)) nhưng đó chỉ là tái sử dụng các struct `RequestFinalizeBlock`, `ResponseInitChain` làm **schema** của API giữa consensus và app. Không có CometBFT process nào chạy.
+
+| Quan sát | Bằng chứng |
+|----------|-----------|
+| CosmosExecutor gọi thẳng BaseApp | [executor/executor.go:358-396](../../executor/executor.go#L358-L396) — `e.app.FinalizeBlock(...)` rồi `e.app.Commit()`, in-process, không qua mạng |
+| Không có staking/distribution thật | [app/wasm_deps.go](../../app/wasm_deps.go) — `noopStakingKeeper`, `noopDistributionKeeper` đứng thay `x/staking` và `x/distribution` |
+| Code "đánh lừa" SDK qua check validator | [app/app.go:437-441](../../app/app.go#L437-L441) — chủ động bắt và nuốt lỗi `"validator set is empty after InitGenesis"`, trả lại đúng `req.Validators` |
+| `ValidatorAddressCodec` chỉ là codec | [app/app.go:109](../../app/app.go#L109) — chuẩn bị để bech32-encode địa chỉ nếu sau này có validator, chứ không định nghĩa set |
+
+### 8.3 Bản đồ kiến trúc rút gọn
+
+```
+EVM stack:
+  ev-node sequencer ──Engine API──► Geth/Reth (state + EVM)
+
+Cosmos stack:
+  ev-node sequencer ──in-process──► CosmosExecutor ──► BaseApp (+WasmKeeper)
+                                    │
+                                    └─ dùng abci/types làm struct
+                                       (không có process CometBFT)
+```
+
+### 8.4 Hệ quả thực tế của việc bỏ CometBFT
+
+| Hệ quả | Mô tả |
+|--------|-------|
+| **IBC `07-tendermint` không xác minh được header** | Light client counterparty cần `ValidatorsHash`, `NextValidatorsHash` và chữ ký ⅔ voting power — tất cả đều rỗng. Đây là lý do IBC core compile được nhưng channel không mở được với chain ngoài. Xem [ibc-integration.md](ibc-integration.md). |
+| **Không có "voting power"** | Mọi cơ chế Cosmos SDK dựa trên `staking.BondedTokens` (governance, slashing) cũng không hoạt động được; do đó đồ án bỏ qua `x/gov`, `x/upgrade`. |
+| **Bù lại — sequencer không thể giả mạo state** | Full node verify lại như mô tả ở section 2; vai trò "validator vote on correctness" được thay bằng *sovereign verification* tại mỗi node. |
+
+→ Việc bỏ CometBFT/validator **không** mất tính đúng của state (vì sovereign verification), nhưng **mất** khả năng tương thích với mọi light client dựa trên BFT — đặc biệt IBC truyền thống. Hai hướng giải quyết được trình bày trong [ibc-integration.md](ibc-integration.md) và [roadmap.md](roadmap.md).
+
 ## Tham chiếu code
 
 | Thành phần | File |
@@ -209,3 +258,8 @@ Vì không có validator set cần thưởng staking, stack cosmos-exec không b
 | Block production | `block/internal/executing/executor.go` |
 | Sync (DA + P2P + forced) | `block/internal/syncing/syncer.go` |
 | 0-fee ante | `apps/cosmos-exec/app/ante.go` |
+| EVM Engine API client | `execution/evm/execution.go`, `engine_rpc_client.go` |
+| EVM single-aggregator init | `apps/evm/cmd/init.go` |
+| CosmosExecutor gọi BaseApp | `apps/cosmos-exec/executor/executor.go` |
+| Stub keeper thay validator/staking | `apps/cosmos-exec/app/wasm_deps.go` |
+| Bypass "validator set is empty" | `apps/cosmos-exec/app/app.go` (~L437) |

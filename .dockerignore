@@ -1,0 +1,37 @@
+# Build context excludes for all Docker builds rooted at the repo.
+# Keeps Go source in; keeps VCS, build outputs, and dev runtime state out.
+
+# Version control
+.git
+.gitignore
+.github
+
+# Build outputs / binaries
+build/
+/build
+dist/
+**/*.test
+
+# Dev runtime state written by scripts/run-cosmos-wasm-nodes.go and friends
+# (BadgerDB vlog files here are locked while a node runs → COPY I/O errors).
+.cosmos-wasm-runner/
+.evcosmos-*/
+.cosmos-exec-*/
+.logs/
+**/*.log
+
+# Local env & secrets — must never be baked into an image
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets/passphrase.txt
+
+# Node / web artifacts (irrelevant to Go image builds)
+**/node_modules/
+**/.next/
+**/out/
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/

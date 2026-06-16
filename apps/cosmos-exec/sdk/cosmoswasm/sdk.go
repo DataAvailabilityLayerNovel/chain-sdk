@@ -7,7 +7,7 @@
 //   - Tier 1 (Core): NewClient / Submit / Query — dùng cho mọi app.
 //   - Tier 2 (Power-user): BuildTx, Namespace, Merkle, Chunk — khi cần kiểm
 //     soát sâu.
-//   - Tier 3 (Dev tooling): Mock, DALChain local — chỉ dùng cho test.
+//   - Tier 3 (Dev tooling): DALChain local — chỉ dùng cho test.
 // File này chỉ chứa documentation comment, không có code chạy.
 //
 // # API Tiers
@@ -21,15 +21,13 @@
 //
 //   - [SDKConfig], [DefaultSDKConfig], [NewClientFromConfig]  — production client setup
 //   - [NewClient]                                              — quick dev client (localhost)
-//   - Client.SubmitBlob, Client.RetrieveBlob, Client.RetrieveBlobData
 //   - Client.SubmitTxBytes, Client.SubmitTxBase64
 //   - Client.GetTxResult, Client.WaitTxResult
+//   - Client.GetTxFinality, Client.WaitTxFinality              — soft vs DA finality
 //   - Client.QuerySmart, Client.QuerySmartRaw
-//   - Client.CommitRoot, Client.CommitCritical                 — blob batch + on-chain root
-//   - Client.SubmitBatch                                       — batch blob upload
-//   - [GetProof]                                               — Merkle inclusion proof
-//   - [EstimateCost]                                           — cost comparison calculator
-//   - [BatchBuilder], [NewBatchBuilder], [BatchBuilderConfig]  — auto-flush accumulator
+//   - [NewBlobClient], BlobClient.SubmitBlob, BlobClient.RetrieveBlob — blob-first DA (Celestia)
+//   - BlobClient.SubmitBatch, BlobClient.VerifyBlob            — batch upload + integrity check
+//   - [BuildBlobCommitTx], [BuildBatchRootTx]                  — record commitment/root on-chain
 //   - [SDKError], sentinel errors ([ErrNotReachable], etc.)    — structured errors
 //
 // ## Tier 2 — Power-user utilities (stable, use when needed)
@@ -44,28 +42,19 @@
 //
 //   Namespace & DA layer:
 //   - [Namespace], [NewNamespaceV0], [NamespaceFromString], [NamespaceFromHex]
-//   - [DAClient]                                               — DA layer interface (Celestia / Mock)
-//   - [DABridge], [NewDABridge]                                — high-level DA + executor bridge
-//   - [DANamespaceConfig]                                      — per-app-chain DA config
 //
-//   Data integrity (used automatically by CommitRoot & BatchBuilder):
+//   Data integrity (used automatically by SubmitBatch & BatchBuilder):
 //   - [MerkleProof], [BuildMerkleProof], [VerifyMerkleProof]   — Merkle proof construction
 //   - [ChunkBlob], [ReassembleChunks]                          — large blob splitting
 //   - [CompressGzip], [DecompressGzip], [CompressIfBeneficial] — gzip helpers
 //   - [MaybeDecompress], [IsGzipCompressed]
 //
 //   Request/response types:
-//   - [ExecutorClient]                                         — transport interface (HTTP / Mock / gRPC)
-//   - [BlobRef], [CommitReceipt], [CommitRootRequest]
+//   - [ExecutorClient]                                         — transport interface (HTTP / gRPC)
 //   - [SubmitTxResponse], [GetTxResultResponse], [TxExecutionResult]
 //   - [BlobSubmitResponse], [BlobRetrieveResponse], [BlobBatchResponse]
-//   - [CostEstimate], [CostBreakdown], [EstimateCostRequest]
 //
 // ## Tier 3 — Dev tooling (may change between minor versions)
-//
-//   Testing mocks:
-//   - [MockExecutorClient], [NewMockClient]                    — in-memory executor mock
-//   - [MockDAClient], [NewMockDAClient]                        — in-memory DA mock
 //
 //   Local chain runner:
 //   - [DALChainConfig], [StartDALChain], [DALChainProcess]     — local chain for dev/test
@@ -97,7 +86,7 @@
 //
 //	import cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 //
-// One import, call NewClient or NewClientFromConfig, then use SubmitBlob /
-// CommitRoot / QuerySmart. Internal refactoring (compression algorithm,
+// One import, call NewClient or NewClientFromConfig for tx/query, and
+// NewBlobClient for blob-first DA. Internal refactoring (compression algorithm,
 // Merkle tree structure, tx encoding) will never break your code.
 package cosmoswasm

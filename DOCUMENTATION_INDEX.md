@@ -39,34 +39,12 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 
 ---
 
-## 💻 CLI Tool (dal-sdk)
-
-| Thành phần | Đường dẫn | Mô tả |
-|----------|----------|-------|
-| **CLI README** | [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md) | CLI commands, flags, usage examples |
-| **CLI Source** | [apps/cosmos-exec/cmd/dal-sdk/main.go](apps/cosmos-exec/cmd/dal-sdk/main.go) | Implementation |
-| **Build command** | `cd apps/cosmos-exec && go build -o dal-sdk ./cmd/dal-sdk` | Compile CLI |
-
-**Available commands:**
-- `chain start` — Start dApp chain
-- `tx submit|result` — Submit & query transactions
-- `contract store|instantiate|execute|query|deploy|deploy-cw20|balance|transfer` — Contract operations
-- `bank send|balance` — Native coin operations
-
-**Example:**
-```bash
-./dal-sdk contract deploy-cw20 --wasm ./cw20.wasm --name Token --symbol TOK --supply 1000000
-```
-
----
-
 ## ⚙️ Chain Architecture
 
 | Component | Path | Binary | Mô tả |
 |-----------|------|--------|-------|
 | **Cosmos WASM Node** | [apps/cosmos-wasm/](apps/cosmos-wasm/) | `evcosmos` | Sequencer + fullnode binary |
 | **Execution Backend** | [apps/cosmos-exec/](apps/cosmos-exec/) | `cosmos-exec-grpc` | Execute tx, update state |
-| **EVM Execution** | [apps/evm/](apps/evm/) | — | EVM compatibility layer |
 | **Orchestration** | [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go) | — | Runner: start sequencer+fullnode+exec |
 | **Node full** | [node/full.go](node/full.go) | — | Full node implementation |
 | **Sequencer** | [node/node.go](node/node.go) | — | Sequencer logic |
@@ -103,7 +81,6 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 
 | Tool | Path | Mô tả |
 |------|------|-------|
-| **dal-sdk** | [apps/cosmos-exec/cmd/dal-sdk/](apps/cosmos-exec/cmd/dal-sdk/) | CLI for chain/contract/tx/bank operations |
 | **cosmos-da-submit** | [tools/cosmos-da-submit/](tools/cosmos-da-submit/) | Submit tx to Cosmos chain + DA |
 | **cosmos-explorer** | [tools/cosmos-explorer/](tools/cosmos-explorer/) | Chain explorer |
 | **da-debug** | [tools/da-debug/](tools/da-debug/) | Debug DA layer issues |
@@ -123,7 +100,6 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 | **Docker E2E** | [test/docker-e2e/](test/docker-e2e/) | Docker-based E2E tests |
 | **Mocks** | [test/mocks/](test/mocks/) | Mock implementations |
 | **Test DA** | [test/testda/](test/testda/) | Test DA layer |
-| **Test app** | [apps/testapp/](apps/testapp/) | Test application |
 
 **Run tests:**
 ```bash
@@ -173,10 +149,9 @@ go test ./node -run TestFullNode
 |------|-------|------------|
 | Start DAL chain quickly | [cosmos.md](cosmos.md) section 3 | `go run ./scripts/run-cosmos-wasm-nodes.go` |
 | Use SDK to write Go app | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) | `go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm` |
-| Use CLI without coding | [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md) | `go build -o dal-sdk ./cmd/dal-sdk` |
-| Deploy a contract | [cosmos.md](cosmos.md) section 5 | `./dal-sdk contract deploy-cw20 ...` |
-| Query contract state | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) section 4 | `./dal-sdk contract query ...` |
-| Submit transaction | [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md) | `./dal-sdk tx submit ...` |
+| Deploy a contract | [getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md) | `BuildStoreTx` + `BuildInstantiateTx` → `SubmitTxBytes` |
+| Query contract state | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) section 4 | `client.QuerySmart(ctx, contract, msg)` |
+| Submit transaction | [api-reference.md](apps/cosmos-exec/sdk/cosmoswasm/docs/api-reference.md) | `client.SubmitTxBytes(ctx, tx)` |
 | Check DA blob | [scripts/query_celestia_blob.sh](scripts/query_celestia_blob.sh) | `./scripts/query_celestia_blob.sh` |
 | Run full E2E tests | [test/e2e/](test/e2e/) | `go test ./test/e2e/...` |
 | Understand architecture | [docs/overview/](docs/overview/) | Read concept docs |
@@ -200,13 +175,9 @@ ev-node/
 │   │   ├── sdk/cosmoswasm/            # ★ Go SDK
 │   │   │   ├── README.md
 │   │   │   └── examples/              # Runnable examples
-│   │   └── cmd/dal-sdk/               # ★ CLI tool
-│   │       ├── README.md
-│   │       └── main.go
-│   └── evm/                           # EVM layer
+│   │   └── cmd/cosmos-exec-grpc/      # HTTP API server (main binary)
 │
 ├── tools/                             # Utility tools
-│   ├── cosmos-da-submit/
 │   ├── da-debug/
 │   ├── evnode-rpc/
 │   └── ...

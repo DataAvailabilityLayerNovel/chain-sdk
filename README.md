@@ -14,7 +14,6 @@ EV-node là nền tảng để chạy chain Cosmos + WASM trên DA layer (Celest
 
 - Runbook Cosmos + WASM: [cosmos.md](cosmos.md)
 - Go SDK cho dApp chain + WASM tx/query: [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md)
-- **CLI SDK (dal-sdk)**: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md)
 - Runner full stack: [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go)
 - RPC block/tx helper: [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh)
 - Deploy / interact contract: dùng SDK Go ([apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md)) hoặc FE my-dapp-web ([frontend-integration.md](apps/cosmos-exec/sdk/cosmoswasm/docs/frontend-integration.md))
@@ -25,7 +24,7 @@ EV-node là nền tảng để chạy chain Cosmos + WASM trên DA layer (Celest
 - `apps/cosmos-wasm`: node binary `evcosmos`
 - `apps/cosmos-exec`: execution backend `cosmos-exec-grpc`
 - `scripts/run-cosmos-wasm-nodes.go`: orchestration sequencer + fullnode + exec services
-- DA submit: đi trực tiếp qua runtime evnode (aggregator), không cần sidecar `cosmos-da-submit`
+- DA submit: đi trực tiếp qua runtime evnode (aggregator), không cần sidecar riêng
 
 Luồng tổng quát:
 
@@ -85,48 +84,6 @@ export DA_AUTH_TOKEN=<token>
 go run ./sdk/cosmoswasm/examples/dapp-chain
 ```
 
-## 4a) Quickstart CLI SDK (dal-sdk)
-
-**dal-sdk** là CLI tool để manage dApp chain, submit tx, deploy/query contract, và thao tác native bank operations **không cần viết Go code**.
-
-### Build
-
-```bash
-cd apps/cosmos-exec
-go build -o dal-sdk ./cmd/dal-sdk
-```
-
-### Gọi lệnh
-
-```bash
-# Start chain
-./dal-sdk chain start --name mycosmos --namespace rollup --da-rpc http://127.0.0.1:26758
-
-# Deploy CW20 contract
-./dal-sdk contract deploy-cw20 \
-  --wasm ./cw20_base.wasm \
-  --name Token \
-  --symbol TOK \
-  --supply 1000000
-
-# Send native tokens
-./dal-sdk bank send --to cosmos1... --amount 1000stake
-
-# Execute contract
-./dal-sdk contract execute --contract cosmos1... --msg '{"increment":{}}'
-
-# Query tx result
-./dal-sdk tx result --hash <tx_hash>
-```
-
-**Các command groups:**
-- `chain` — Start/manage dApp chain
-- `tx` — Submit & track transactions
-- `contract` — WASM contract operations (store, instantiate, execute, query, deploy, balance, transfer)
-- `bank` — Native coin operations (send, balance check)
-
-Xem chi tiết: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/dal-sdk/README.md)
-
 ## 5) Lệnh thường dùng cho Cosmos chain (Scripts)
 
 - RPC state/block/tx:
@@ -134,10 +91,6 @@ Xem chi tiết: [apps/cosmos-exec/cmd/dal-sdk/README.md](apps/cosmos-exec/cmd/da
 	- `./scripts/contracts/wasm-rpc.sh latest-block`
 	- `./scripts/contracts/wasm-rpc.sh tx --hash <HEX_TX_HASH>`
 - Contract flow: dùng SDK Go ([getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md)) hoặc FE my-dapp-web — bash wrapper đã bỏ.
-- DA blob query/watch:
-	- `./scripts/query_celestia_blob.sh`
-	- `./scripts/query_celestia_blob_range.sh --from-height <N> --to-height <M>`
-	- `./scripts/watch_celestia_latest_blobs.sh --show-errors`
 
 ## 6) Biến môi trường & địa chỉ endpoint
 

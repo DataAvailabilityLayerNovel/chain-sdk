@@ -401,6 +401,24 @@ func (app *App) sweepFeesToTreasury(ctx sdk.Context) error {
 // InitChainer: chạy 1 lần khi chain khởi tạo (block 0). Nhận RequestInitChain
 // (chứa app state ban đầu), trả ResponseInitChain.
 func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+	// Sentinel writes for stores that are mounted but otherwise unused
+	// (params, consensus). Without at least one KV pair, every Commit
+	// calls iavl.SaveEmptyRoot, which writes []byte{} — and cosmos-db's
+	// GoLevelDB.Get returns nil for both missing keys and empty values,
+	// so the next LoadLatestVersion fails with "version does not exist".
+	//
+	// Write through the commit-level store (not ctx.KVStore, which is the
+	// FinalizeBlock cache). The executor force-commits app.cms right
+	// after InitChain returns and discards finalizeBlockState before the
+	// first ExecuteTxs runs Write(); anything in the cache at that point
+	// is lost. The commit store goes straight to the IAVL tree.
+	//
+	// MUST run before InitGenesis: the "validator set is empty" path
+	// below returns early, skipping anything written after it.
+	cms := app.CommitMultiStore()
+	cms.GetCommitKVStore(app.keys[consensustypes.StoreKey]).Set([]byte("init"), []byte{1})
+	cms.GetCommitKVStore(app.keys[paramtypes.StoreKey]).Set([]byte("init"), []byte{1})
+
 	// genesisState: map tên module -> JSON genesis của module đó.
 	var genesisState map[string]json.RawMessage
 	if len(req.AppStateBytes) == 0 {

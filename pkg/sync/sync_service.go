@@ -165,9 +165,17 @@ func (syncService *SyncService[H]) WriteToStoreAndBroadcast(ctx context.Context,
 			return nil
 		}
 
-		// Most broadcast failures are duplicate gossip (peer already has the
-		// header/data via direct exchange). Log as warn — not fatal.
-		syncService.logger.Warn().Err(err).Msg("failed to broadcast")
+		// Most broadcast failures are duplicate gossip: the producing node
+		// validates its own message against its store and rejects it because
+		// the header/data is already known. This is expected (especially for a
+		// solo sequencer) and not fatal, so log at debug level. Only genuinely
+		// unexpected broadcast errors are surfaced as warnings.
+		if errors.Is(err, pubsub.ValidationError{Reason: pubsub.RejectValidationFailed}) ||
+			errors.Is(err, pubsub.ValidationError{Reason: pubsub.RejectValidationIgnored}) {
+			syncService.logger.Debug().Err(err).Msg("failed to broadcast")
+		} else {
+			syncService.logger.Warn().Err(err).Msg("failed to broadcast")
+		}
 	}
 
 	return nil

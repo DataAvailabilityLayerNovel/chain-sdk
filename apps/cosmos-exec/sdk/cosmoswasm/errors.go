@@ -28,7 +28,7 @@ var (
 // VI: lỗi "giàu thông tin" của SDK — Op (đang làm gì), Cause (lỗi gốc),
 // Hint (gợi ý sửa cho dev).
 type SDKError struct {
-	// Op is the SDK operation that failed (e.g. "SubmitBlob", "CommitRoot").
+	// Op is the SDK operation that failed (e.g. "SubmitBlob", "SubmitBatch").
 	Op string
 	// Cause is the underlying error.
 	Cause error

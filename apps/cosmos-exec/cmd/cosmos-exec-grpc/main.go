@@ -244,8 +244,6 @@ func withMetrics(next http.HandlerFunc, m *Metrics, kind string) http.HandlerFun
 		switch kind { // switch theo loại để tăng đúng counter.
 		case "tx_submit":
 			m.incTxSubmit()
-		case "blob_submit":
-			m.incBlobSubmit()
 		case "query":
 			m.incQuery()
 		}

@@ -79,10 +79,20 @@ type nodeConfig struct {
 // dùng để log/diagnostic — DA submission thật do evnode runtime tự xử lý qua --evnode.da.*.
 type runConfig struct {
 	chainID         string
+	profile         string // dev | prod. prod = state bền vững + passphrase thật + cosmos-exec --profile prod
+	passphraseFile  string // prod: path tới file passphrase signer (input từ --passphrase-file)
 	cleanOnStart    bool
 	cleanOnExit     bool
 	logLevel        string
 	blockTime       time.Duration
+
+	// Lazy aggregation: sequencer chỉ sản xuất block khi có tx (hoặc khi tới
+	// lazyBlockInterval) thay vì đều đặn mỗi blockTime → tiết kiệm tài nguyên,
+	// không tạo empty block lúc chain rảnh. lazyBlockInterval BẮT BUỘC > blockTime
+	// (evnode validate điều này; xem pkg/config/config.go). Chỉ áp cho aggregator.
+	lazyMode          bool
+	lazyBlockInterval time.Duration
+
 	daAddress       string
 	daSubmitAddress string
 	daAuthToken     string
@@ -92,6 +102,13 @@ type runConfig struct {
 	submitAPIType   string
 	submitInterval  time.Duration
 	chainLogFile    string
+
+	// Forced inclusion (censorship resistance).
+	// Empty namespace = disabled. When set, users can post tx directly to this DA
+	// namespace, bypassing the sequencer; sequencer MUST include such tx within
+	// the epoch defined by daForcedInclusionEpoch (in DA blocks).
+	daForcedInclusionNamespace string
+	daForcedInclusionEpoch     uint64
 }
 
 type processHandle struct {
@@ -116,17 +133,53 @@ type nodeManager struct {
 	logMu          sync.Mutex
 	nodes          []nodeConfig
 	lastBlobHeight uint64
+
+	// passphraseEphemeral=true khi runner tự tạo file passphrase (dev) → xóa lúc
+	// cleanup. Prod dùng file người dùng cung cấp → KHÔNG xóa.
+	passphraseEphemeral bool
 }
 
 func main() {
 	cfg := runConfig{}
 	flag.StringVar(&cfg.chainID, "chain-id", "cosmos-wasm-local", "Chain ID for evcosmos nodes")
+	flag.StringVar(&cfg.profile, "profile", "dev", "Runtime profile: dev | prod (prod = persistent state + real passphrase + cosmos-exec --profile prod)")
+	flag.StringVar(&cfg.passphraseFile, "passphrase-file", "", "Path to signer passphrase file (required for --profile prod unless EVCOSMOS_PASSPHRASE[_FILE] is set)")
 	flag.BoolVar(&cfg.cleanOnStart, "clean-on-start", true, "Remove old node home directories before start")
 	flag.BoolVar(&cfg.cleanOnExit, "clean-on-exit", false, "Remove node home directories on exit")
 	flag.StringVar(&cfg.logLevel, "log-level", "info", "evcosmos log level")
 	flag.DurationVar(&cfg.blockTime, "block-time", 2*time.Second, "evcosmos block time")
+	flag.BoolVar(&cfg.lazyMode, "lazy-mode", false, "Enable lazy aggregation: sequencer produces blocks only when txs are available or after --lazy-block-interval")
+	flag.DurationVar(&cfg.lazyBlockInterval, "lazy-block-interval", 60*time.Second, "Max interval between blocks in lazy mode (must be > --block-time)")
 	flag.DurationVar(&cfg.submitInterval, "submit-interval", 8*time.Second, "DA submitter interval")
+	flag.StringVar(&cfg.daForcedInclusionNamespace, "forced-inclusion-namespace", "", "DA namespace for forced inclusion txs (empty = disabled)")
+	flag.Uint64Var(&cfg.daForcedInclusionEpoch, "forced-inclusion-epoch", 50, "DA blocks per forced inclusion epoch (only used when namespace is set)")
 	flag.Parse()
+
+	switch cfg.profile {
+	case "dev", "prod":
+	default:
+		log.Fatalf("invalid --profile %q: must be dev or prod", cfg.profile)
+	}
+
+	// evnode reject cấu hình lazy mà interval <= block time — bắt sớm ở đây
+	// thay vì để sequencer crash lúc start.
+	if cfg.lazyMode && cfg.lazyBlockInterval <= cfg.blockTime {
+		log.Fatalf("--lazy-block-interval (%v) must be greater than --block-time (%v) when --lazy-mode is set", cfg.lazyBlockInterval, cfg.blockTime)
+	}
+
+	// Prod: mặc định KHÔNG xóa state (persistent) trừ khi user set --clean-on-start
+	// rõ ràng. Phát hiện qua flag.Visit để tôn trọng lựa chọn tường minh.
+	if cfg.profile == "prod" {
+		cleanExplicit := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "clean-on-start" {
+				cleanExplicit = true
+			}
+		})
+		if !cleanExplicit {
+			cfg.cleanOnStart = false
+		}
+	}
 
 	nm := &nodeManager{
 		cfg:       cfg,
@@ -221,9 +274,20 @@ func (nm *nodeManager) run() error {
 	}
 
 	log.Printf("Cosmos/WASM stack is running")
+	log.Printf("- profile: %s (clean-on-start=%v, passphrase=%s)", nm.cfg.profile, nm.cfg.cleanOnStart, nm.passphraseFile)
+	if nm.cfg.lazyMode {
+		log.Printf("- lazy mode: ENABLED (block only on tx, max interval=%s, block_time=%s)", nm.cfg.lazyBlockInterval, nm.cfg.blockTime)
+	} else {
+		log.Printf("- lazy mode: disabled (pass --lazy-mode to enable)")
+	}
 	log.Printf("- celestia DA endpoint used by nodes: %s", nm.cfg.daAddress)
 	log.Printf("- da namespace used by nodes: %s", nm.cfg.daNamespace)
 	log.Printf("- da submission path: evnode runtime (aggregator)")
+	if nm.cfg.daForcedInclusionNamespace != "" {
+		log.Printf("- forced inclusion: ENABLED namespace=%s epoch=%d DA-blocks", nm.cfg.daForcedInclusionNamespace, nm.cfg.daForcedInclusionEpoch)
+	} else {
+		log.Printf("- forced inclusion: disabled (pass --forced-inclusion-namespace to enable)")
+	}
 	log.Printf("- sequencer rpc: http://127.0.0.1:%d", nm.nodes[0].rpcPort)
 	log.Printf("- full node rpc: http://127.0.0.1:%d", nm.nodes[1].rpcPort)
 	log.Printf("- sequencer execution gRPC: http://127.0.0.1:%d", nm.nodes[0].execGRPCPort)
@@ -238,21 +302,53 @@ func (nm *nodeManager) run() error {
 // log file append-only. Nếu cleanOnStart thì xóa toàn bộ state cũ trước — bắt buộc
 // khi đổi chain_id, genesis, hoặc bật A+B treasury (xem docs/fee-economics.md mục 6b).
 func (nm *nodeManager) preparePaths() error {
-	tmpDir := filepath.Join(nm.projectRoot, ".cosmos-wasm-runner")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		return fmt.Errorf("create runner temp dir: %w", err)
+	// Toàn bộ runtime state sống dưới 1 base dir duy nhất để repo root không bị
+	// rải rác dotfile (.evcosmos-*, .cosmos-exec-*, .logs...). Layout:
+	//   .cosmos-wasm-runner/
+	//     passphrase.txt
+	//     nodes/evcosmos-<name>/      (evcosmos home)
+	//     nodes/cosmos-exec-<name>/   (cosmos-exec-grpc home)
+	//     logs/cosmos-wasm-chain.log
+	baseDir := filepath.Join(nm.projectRoot, ".cosmos-wasm-runner")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return fmt.Errorf("create runner base dir: %w", err)
 	}
 
-	// Passphrase dev cố định "secret" — chỉ dùng local, KHÔNG đem lên môi trường thật.
-	nm.passphraseFile = filepath.Join(tmpDir, "passphrase.txt")
-	if err := os.WriteFile(nm.passphraseFile, []byte("secret\n"), 0o600); err != nil {
-		return fmt.Errorf("write passphrase file: %w", err)
+	// Passphrase: dev dùng "secret" cố định (tiện local). Prod BẮT BUỘC passphrase
+	// thật từ --passphrase-file / EVCOSMOS_PASSPHRASE_FILE (dùng trực tiếp, không
+	// copy) hoặc EVCOSMOS_PASSPHRASE (ghi ra baseDir). Prod KHÔNG xóa file lúc thoát.
+	if nm.cfg.profile == "prod" {
+		src := firstNonEmpty(nm.cfg.passphraseFile, os.Getenv("EVCOSMOS_PASSPHRASE_FILE"))
+		switch {
+		case src != "":
+			if _, err := os.Stat(src); err != nil {
+				return fmt.Errorf("prod passphrase file not found: %s: %w", src, err)
+			}
+			nm.passphraseFile = src
+			nm.passphraseEphemeral = false
+		case os.Getenv("EVCOSMOS_PASSPHRASE") != "":
+			nm.passphraseFile = filepath.Join(baseDir, "passphrase.txt")
+			if err := os.WriteFile(nm.passphraseFile, []byte(os.Getenv("EVCOSMOS_PASSPHRASE")+"\n"), 0o600); err != nil {
+				return fmt.Errorf("write passphrase file: %w", err)
+			}
+			nm.passphraseEphemeral = false
+		default:
+			return errors.New("prod profile requires a signer passphrase: set --passphrase-file <path> or env EVCOSMOS_PASSPHRASE[_FILE]")
+		}
+	} else {
+		// dev — KHÔNG dùng cho môi trường thật.
+		nm.passphraseFile = filepath.Join(baseDir, "passphrase.txt")
+		if err := os.WriteFile(nm.passphraseFile, []byte("secret\n"), 0o600); err != nil {
+			return fmt.Errorf("write passphrase file: %w", err)
+		}
+		nm.passphraseEphemeral = true
 	}
 
+	nodesDir := filepath.Join(baseDir, "nodes")
 	for i := range nm.nodes {
 		node := &nm.nodes[i]
-		node.homeDir = filepath.Join(nm.projectRoot, fmt.Sprintf(".evcosmos-%s", node.name))
-		node.execHomeDir = filepath.Join(nm.projectRoot, fmt.Sprintf(".cosmos-exec-%s", node.name))
+		node.homeDir = filepath.Join(nodesDir, fmt.Sprintf("evcosmos-%s", node.name))
+		node.execHomeDir = filepath.Join(nodesDir, fmt.Sprintf("cosmos-exec-%s", node.name))
 		nm.nodeDirs = append(nm.nodeDirs, node.homeDir, node.execHomeDir)
 	}
 
@@ -272,7 +368,7 @@ func (nm *nodeManager) preparePaths() error {
 
 	logPath := nm.cfg.chainLogFile
 	if logPath == "" {
-		logPath = filepath.Join(nm.projectRoot, ".logs", "cosmos-wasm-chain.log")
+		logPath = filepath.Join(baseDir, "logs", "cosmos-wasm-chain.log")
 	}
 	if !filepath.IsAbs(logPath) {
 		logPath = filepath.Join(nm.projectRoot, logPath)
@@ -383,9 +479,17 @@ func (nm *nodeManager) initNodes() error {
 			"--evnode.p2p.listen_address", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", node.p2pPort),
 			"--evnode.signer.passphrase_file", nm.passphraseFile,
 		}
+		if nm.cfg.daForcedInclusionNamespace != "" {
+			args = append(args, "--evnode.da.forced_inclusion_namespace", nm.cfg.daForcedInclusionNamespace)
+		}
 		if err := runCommand(nm.ctx, filepath.Join(nm.projectRoot, "apps", "cosmos-wasm"), evcosmos, args...); err != nil {
 			return fmt.Errorf("init %s: %w", node.name, err)
 		}
+	}
+
+	// Patch genesis ONLY on sequencer; full node will receive a copy.
+	if err := nm.patchGenesisForcedInclusion(filepath.Join(nm.nodes[0].homeDir, "config", "genesis.json")); err != nil {
+		return fmt.Errorf("patch sequencer genesis: %w", err)
 	}
 
 	seqGenesis := filepath.Join(nm.nodes[0].homeDir, "config", "genesis.json")
@@ -394,6 +498,46 @@ func (nm *nodeManager) initNodes() error {
 		return fmt.Errorf("copy genesis to full node: %w", err)
 	}
 
+	return nil
+}
+
+// patchGenesisForcedInclusion overrides da_epoch_forced_inclusion in evnode
+// genesis. Called only when forced inclusion is enabled and the user provided
+// a non-default epoch. Skips if epoch is 0 (means "keep evnode default of 50").
+//
+// evnode's genesis is plain JSON with a flat schema (no nested module state),
+// so we round-trip through map[string]interface{} to preserve any unknown keys
+// added by future evnode versions.
+func (nm *nodeManager) patchGenesisForcedInclusion(path string) error {
+	if nm.cfg.daForcedInclusionNamespace == "" {
+		return nil // mechanism disabled — keep default
+	}
+	if nm.cfg.daForcedInclusionEpoch == 0 {
+		return nil // user opted out of override
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read genesis %s: %w", path, err)
+	}
+
+	var gen map[string]interface{}
+	if err := json.Unmarshal(raw, &gen); err != nil {
+		return fmt.Errorf("unmarshal genesis: %w", err)
+	}
+
+	gen["da_epoch_forced_inclusion"] = nm.cfg.daForcedInclusionEpoch
+
+	out, err := json.MarshalIndent(gen, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal genesis: %w", err)
+	}
+
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return fmt.Errorf("write genesis %s: %w", path, err)
+	}
+
+	log.Printf("Forced inclusion enabled: namespace=%s epoch=%d DA-blocks", nm.cfg.daForcedInclusionNamespace, nm.cfg.daForcedInclusionEpoch)
 	return nil
 }
 
@@ -408,6 +552,7 @@ func (nm *nodeManager) startExecutionServices() error {
 
 	for _, node := range nm.nodes {
 		args := []string{
+			"--profile", nm.cfg.profile,
 			"--address", fmt.Sprintf("127.0.0.1:%d", node.execGRPCPort),
 			"--home", node.execHomeDir,
 		}
@@ -446,6 +591,15 @@ func (nm *nodeManager) startSequencer() error {
 		"--evnode.signer.passphrase_file", nm.passphraseFile,
 		"--evnode.node.block_time", nm.cfg.blockTime.String(),
 		"--evnode.log.level", nm.cfg.logLevel,
+	}
+	if nm.cfg.lazyMode {
+		args = append(args,
+			"--evnode.node.lazy_mode=true",
+			"--evnode.node.lazy_block_interval", nm.cfg.lazyBlockInterval.String(),
+		)
+	}
+	if nm.cfg.daForcedInclusionNamespace != "" {
+		args = append(args, "--evnode.da.forced_inclusion_namespace", nm.cfg.daForcedInclusionNamespace)
 	}
 
 	cmd := exec.CommandContext(nm.ctx, filepath.Join(nm.binariesDir, "evcosmos"), args...)
@@ -486,6 +640,9 @@ func (nm *nodeManager) startFullNode() error {
 		"--evnode.node.block_time", nm.cfg.blockTime.String(),
 		"--evnode.log.level", nm.cfg.logLevel,
 	}
+	if nm.cfg.daForcedInclusionNamespace != "" {
+		args = append(args, "--evnode.da.forced_inclusion_namespace", nm.cfg.daForcedInclusionNamespace)
+	}
 
 	cmd := exec.CommandContext(nm.ctx, filepath.Join(nm.binariesDir, "evcosmos"), args...)
 	cmd.Dir = filepath.Join(nm.projectRoot, "apps", "cosmos-wasm")
@@ -504,15 +661,25 @@ func (nm *nodeManager) startFullNode() error {
 // (≤10 block lag). Cố ý KHÔNG fatal khi timeout — chỉ log WARN rồi cho stack
 // chạy tiếp, để user còn vào RPC/log mà chẩn đoán nguyên nhân chậm (DA chết,
 // peer dial fail, blob backpressure...).
+//
+// RPC của evnode là connect/gRPC (không phải HTTP `/status` — path đó trả 404),
+// nên ta build tool tools/evnode-rpc 1 lần rồi query `status` (last_block_height)
+// cho mỗi node thay vì GET /status như trước.
 func (nm *nodeManager) waitForChainSync() error {
-	seqURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[0].rpcPort)
-	fullURL := fmt.Sprintf("http://127.0.0.1:%d/status", nm.nodes[1].rpcPort)
+	rpcTool := filepath.Join(nm.binariesDir, "evnode-rpc")
+	if err := runCommand(nm.ctx, nm.projectRoot, "go", "build", "-o", rpcTool, "./tools/evnode-rpc"); err != nil {
+		log.Printf("WARN: build evnode-rpc tool failed, skipping sync check: %v", err)
+		return nil
+	}
+
+	seqURL := fmt.Sprintf("http://127.0.0.1:%d", nm.nodes[0].rpcPort)
+	fullURL := fmt.Sprintf("http://127.0.0.1:%d", nm.nodes[1].rpcPort)
 
 	deadline := time.Now().Add(5 * time.Minute)
 	lastSeq, lastFull := int64(0), int64(0)
 	for time.Now().Before(deadline) {
-		seqHeight, err1 := fetchLatestHeight(seqURL)
-		fullHeight, err2 := fetchLatestHeight(fullURL)
+		seqHeight, err1 := nm.fetchNodeHeight(rpcTool, seqURL)
+		fullHeight, err2 := nm.fetchNodeHeight(rpcTool, fullURL)
 		if err1 == nil && err2 == nil {
 			lastSeq, lastFull = seqHeight, fullHeight
 			if seqHeight > 0 && fullHeight > 0 && fullHeight <= seqHeight && seqHeight-fullHeight <= 10 {
@@ -520,12 +687,40 @@ func (nm *nodeManager) waitForChainSync() error {
 				return nil
 			}
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-nm.ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
 	}
 
 	log.Printf("WARN: full node did not reach sync window within 5m (sequencer=%d fullnode=%d). Continuing to run — inspect logs and RPCs to diagnose.",
 		lastSeq, lastFull)
 	return nil
+}
+
+// fetchNodeHeight: query last_block_height của 1 node qua tool evnode-rpc
+// (lệnh `status` → GetState). rpcURL truyền qua env EVNODE_RPC_URL.
+func (nm *nodeManager) fetchNodeHeight(rpcTool, rpcURL string) (int64, error) {
+	cmd := exec.CommandContext(nm.ctx, rpcTool, "status")
+	cmd.Dir = nm.projectRoot
+	cmd.Env = append(os.Environ(), "EVNODE_RPC_URL="+rpcURL)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	var resp struct {
+		LastBlockHeight json.Number `json:"last_block_height"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return 0, err
+	}
+	h, err := resp.LastBlockHeight.Int64()
+	if err != nil {
+		return 0, err
+	}
+	return h, nil
 }
 
 func (nm *nodeManager) getNodePeerAddress(home string) (string, error) {
@@ -687,7 +882,7 @@ func (nm *nodeManager) cleanup() {
 		}
 	}
 
-	if nm.passphraseFile != "" {
+	if nm.passphraseFile != "" && nm.passphraseEphemeral {
 		_ = os.Remove(nm.passphraseFile)
 	}
 
@@ -723,7 +918,7 @@ func (nm *nodeManager) writeLogLine(line string) {
 // emitBlobHeightHint: parse log của evcosmos để rút ra DA blob height và in
 // hint cho user. Có deduplicate (lastBlobHeight) để không spam khi cùng 1 height
 // được nhắc nhiều lần. Mục đích: lúc dev muốn verify blob trên Celestia thì
-// biết ngay height nào để query (xem scripts/query_celestia_blob.sh).
+// biết ngay height nào để query.
 func (nm *nodeManager) emitBlobHeightHint(source, line string) {
 	if strings.Contains(line, "engram_submit") && !strings.Contains(line, "da_height=") {
 		nm.writeLogLine("[runner][blob-height] engram_submit acknowledged (status=200) but DA blob height is not provided by this API")
@@ -792,7 +987,6 @@ func (nm *nodeManager) logLatestBlobHeightHint() {
 	}
 
 	nm.emitBlobHeightHint("latest-block", fmt.Sprintf("blob_height=%d", blobHeight))
-	log.Printf("[runner][blob-height] tip: ./scripts/query_celestia_blob.sh --height %d", blobHeight)
 }
 
 // resolveDAFromEnv: map env DA_*/ENGRAM_*/COSMOS_DA_* → runConfig.
@@ -954,33 +1148,6 @@ func waitForHTTPStatus(url string, timeout time.Duration) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", url)
-}
-
-func fetchLatestHeight(statusURL string) (int64, error) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(statusURL)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	re := regexp.MustCompile(`"latest_block_height"\s*:\s*"?(\d+)"?`)
-	match := re.FindSubmatch(body)
-	if len(match) != 2 {
-		return 0, fmt.Errorf("latest_block_height not found")
-	}
-
-	height, err := strconv.ParseInt(string(match[1]), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return height, nil
 }
 
 // findProjectRoot: đi ngược từ cwd lên đến khi gặp thư mục có cả go.mod VÀ apps/.

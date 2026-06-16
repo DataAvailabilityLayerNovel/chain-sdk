@@ -151,56 +151,10 @@ func swaggerSpec() map[string]any {
 				},
 			},
 
-			// ── BLOB ────────────────────────────────────────────────
-			"/blob/submit": map[string]any{
-				"post": map[string]any{
-					"tags":        []string{"blob"},
-					"summary":     "Store a single blob",
-					"description": "Uploads raw data to the content-addressed blob store. Returns a SHA-256 commitment to record on-chain.",
-					"requestBody": reqBody("application/json", ref("BlobSubmitRequest")),
-					"responses": map[string]any{
-						"200": resp("Blob stored", ref("BlobSubmitResponse")),
-						"400": resp("Invalid request or blob too large", ref("ErrorResponse")),
-					},
-				},
-			},
-			"/blob/retrieve": map[string]any{
-				"get": map[string]any{
-					"tags":    []string{"blob"},
-					"summary": "Retrieve a blob by commitment",
-					"parameters": []map[string]any{
-						queryParam("commitment", "string", true, "SHA-256 commitment (hex)"),
-					},
-					"responses": map[string]any{
-						"200": resp("Blob data", ref("BlobRetrieveResponse")),
-						"404": resp("Blob not found", ref("ErrorResponse")),
-					},
-				},
-			},
-			"/blob/batch": map[string]any{
-				"post": map[string]any{
-					"tags":        []string{"blob"},
-					"summary":     "Store multiple blobs and get Merkle root",
-					"description": "Uploads N blobs, computes a binary Merkle root over their SHA-256 commitments. Commit the root on-chain (32 bytes) instead of N blobs.",
-					"requestBody": reqBody("application/json", ref("BlobBatchRequest")),
-					"responses": map[string]any{
-						"200": resp("Batch stored", ref("BlobBatchResponse")),
-						"400": resp("Invalid request", ref("ErrorResponse")),
-					},
-				},
-			},
-			"/blob/estimate-cost": map[string]any{
-				"post": map[string]any{
-					"tags":        []string{"blob"},
-					"summary":     "Estimate gas cost: direct tx vs blob+commit",
-					"description": "Compares the gas cost of embedding data in WASM messages (expensive) vs the blob-first pattern (cheap). Uses Celestia gas model.",
-					"requestBody": reqBody("application/json", ref("EstimateCostRequest")),
-					"responses": map[string]any{
-						"200": resp("Cost comparison", ref("CostEstimate")),
-						"400": resp("Invalid request", ref("ErrorResponse")),
-					},
-				},
-			},
+			// NOTE: blob-first data (large off-chain data on Celestia DA) is NOT
+			// served by cosmos-exec-grpc. The SDK's BlobClient talks to a Celestia
+			// bridge directly. Only the on-chain commitment is recorded here, via a
+			// normal /tx/submit (CosmWasm execute with a "record_blob" message).
 		},
 		"components": map[string]any{
 			"schemas": schemas(),
@@ -357,37 +311,6 @@ func schemas() map[string]any {
 				}},
 			),
 		},
-		"EstimateCostRequest": obj(
-			prop("data_bytes", "integer", "Total data size in bytes"),
-			prop("gas_price_tia", "number", "Celestia gas price in uTIA/gas (default: 0.002)"),
-			prop("max_blob_size", "integer", "Per-blob DA limit in bytes (default: 4MB)"),
-		),
-		"CostEstimate": map[string]any{
-			"type": "object",
-			"properties": mergeProps(
-				prop("data_bytes", "integer", "Input data size"),
-				prop("compressed_bytes", "integer", "Estimated compressed size"),
-				prop("savings_percent", "number", "Percentage saved with blob+commit"),
-				prop("num_batches", "integer", "Number of DA submissions needed"),
-				map[string]any{
-					"direct_tx":   costBreakdownSchema("Cost of embedding data in WASM messages"),
-					"blob_commit": costBreakdownSchema("Cost using blob-first pattern"),
-				},
-			),
-		},
-	}
-}
-
-func costBreakdownSchema(desc string) map[string]any {
-	return map[string]any{
-		"type":        "object",
-		"description": desc,
-		"properties": mergeProps(
-			prop("da_gas", "integer", "Celestia DA gas"),
-			prop("on_chain_gas", "integer", "Cosmos SDK execution gas"),
-			prop("total_gas", "integer", "Total gas (da + on-chain)"),
-			prop("est_fee_tia", "number", "Estimated fee in TIA"),
-		),
 	}
 }
 

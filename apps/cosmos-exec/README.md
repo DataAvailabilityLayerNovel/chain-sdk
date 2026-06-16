@@ -7,8 +7,6 @@ Cosmos/WASM rollup trên ev-node gồm 2 binary:
 | `cosmos-exec-grpc` | `apps/cosmos-exec/cmd/cosmos-exec-grpc` | **Execution service** — Cosmos SDK + CosmWasm runtime, HTTP API, blob store |
 | `evcosmos` | `apps/cosmos-wasm` | **Full node** — sequencer, P2P, DA sync, block production |
 
-`cosmos-exec` còn có `cmd/cosmos-exec` (standalone ABCI socket server) cho testing.
-
 ## Build
 
 ```bash

@@ -34,6 +34,203 @@ Hiện chain chạy **ante 0-fee** (`NewPermissionlessAnteHandler`, `apps/cosmos
 
 ---
 
+## 1b. Hàm ước lượng phí: `/tx/estimate` vs `/tx/simulate` (cách tính chi tiết)
+
+Có **hai** endpoint ước lượng, khác nhau ở chỗ *đo thật* hay *tính theo công thức*:
+
+| | `/tx/estimate` | `/tx/simulate` |
+|---|---|---|
+| Trả lời | "Tx này *sẽ* tốn bao nhiêu (cả DA + gas)?" | "Gas THẬT là bao nhiêu → gas_limit + fee để ký?" |
+| Chạy tx? | Không (trừ khi tra theo `hash`) | **Có** — chạy ante+handler, không commit |
+| Thành phần | DA_cost **+** gas_cost (mô phỏng) | Chỉ gas/fee (đúng cái ante enforce) |
+| Dùng khi | dashboard/operator xem "kinh tế production" | **ví gọi trước khi ký** để fee khớp tx thật |
+| Code | `txEstimateHandler` (main.go) + `cmd/cosmos-exec-grpc/cost.go` | `txSimulateHandler` (main.go) + `feeForGas` (faucet.go) |
+
+### A. `/tx/estimate` — phép tính chính sách áp lên số đo
+
+Nhận 1 trong 3 dạng input (`estimateRequest`), suy ra `(bytes, gas)`:
+
+| Input | `bytes` lấy từ | `gas` lấy từ |
+|---|---|---|
+| `{hash}` | tx đã chạy (`result.Bytes`) | `result.GasUsed` (đo thật) |
+| `{tx_base64\|tx_hex}` | `len(raw)` | caller tự truyền (chưa chạy nên không tự biết) |
+| `{bytes, gas}` | trực tiếp | trực tiếp |
+
+Rồi `costPolicy.estimate(bytes, gas)` áp đúng công thức 2 dòng ở Mục 1:
+
+```
+EstDAAmount  = bytes × COSMOS_EXEC_TIA_PER_BYTE     // big.Float, in TIA
+EstGasAmount = gas   × COSMOS_EXEC_MIN_GAS_PRICE     // big.Float, in ustake
+```
+
+Dùng `big.Float` (mantissa 80 bit) để giá/byte rất nhỏ × hàng triệu byte không
+mất số lẻ; kết quả trả về dạng **chuỗi thập phân** (`trimZeros`) để không sai số
+qua JSON. Response (`CostBreakdown`) phơi luôn `da_price_per_byte` + `min_gas_price`
+đã dùng → dashboard biết vì sao số thay đổi khi operator retune.
+
+> `/tx/estimate` **không** chạy tx (trừ dạng `hash`), nên với raw tx nó chỉ biết
+> `bytes`; `gas` phải do caller cung cấp. Muốn `gas` chính xác → dùng `/tx/simulate`.
+
+### B. `/tx/simulate` — đo gas thật rồi suy ra fee
+
+Nhận raw tx, decode, rồi `exec.SimulateTx(ctx, raw)` chạy tx qua **ante + msg
+handler nhưng KHÔNG commit** → `SimulateResult{GasUsed, GasWanted}`. Đây là gas
+**thật** mà tx tiêu, không phải phỏng đoán theo byte.
+
+Ba bước biến `gas_used` → `fee`:
+
+```
+1. gas_limit = ceil(gas_used × COSMOS_EXEC_GAS_ADJUSTMENT)
+   // cài bằng số nguyên permille để tránh float:
+   //   permille = 1300 (=1.3 mặc định)
+   //   gas_limit = (gas_used × permille + 999) / 1000     // +999 = làm tròn LÊN
+   //   nếu gas_limit == 0 → fallback gas_wanted
+
+2. fee = feeForGas(gas_limit):
+   price = COSMOS_EXEC_MIN_GAS_PRICE  (LegacyDec; rỗng/≤0 → KHÔNG fee, trả nil)
+   amount = ceil(price × gas_limit)                         // RoundInt sau Ceil
+   denom  = COSMOS_EXEC_GAS_DENOM (mặc định "ustake")
+   → sdk.Coins{ amount denom }
+
+3. response: { gas_used, gas_wanted, gas_limit, fee, fee_denom, fee_amount }
+```
+
+**Vì sao nhân 1.3?** Gas đo lúc simulate có thể lệch nhẹ so với lúc thực thi
+(state đã đổi giữa hai thời điểm). Nhân hệ số đệm (gas adjustment, chuẩn Cosmos)
+để tránh tx out-of-gas. Tinh chỉnh qua env:
+
+| Env | Default | Ý nghĩa |
+|---|---|---|
+| `COSMOS_EXEC_GAS_ADJUSTMENT` | `1.3` | Hệ số đệm gas_used → gas_limit (clamp ≥ 1.0) |
+| `COSMOS_EXEC_MIN_GAS_PRICE` | `0.000001` | Giá gas → fee (cùng giá ante enforce) |
+| `COSMOS_EXEC_GAS_DENOM` | `ustake` | Denom của fee |
+
+Vì `feeForGas` dùng đúng `COSMOS_EXEC_MIN_GAS_PRICE` mà ante kiểm tra, **fee do
+`/tx/simulate` trả ra chính là mức ante sẽ yêu cầu** khi bật enforce (Mục 6) —
+không lệch giữa "ước lượng" và "thực thu".
+
+### C. Quy trình ví khuyến nghị
+
+```
+/tx/simulate(tx chưa ký) → gas_limit + fee
+        ↓ (gắn gas_limit + fee vào tx)
+ký tx → /tx/submit → /tx/result (đợi kết quả)
+```
+
+`/tx/estimate` để **quan sát/định giá** (gồm cả DA_cost cho bức tranh kinh tế đầy
+đủ); `/tx/simulate` để **lấy số đi ký**. Hai cái bổ sung nhau, không thay thế.
+
+> Liên hệ blob-first: `/tx/simulate` cho `gas_used` THẬT của một tx nhúng data lớn
+> vào WASM — chính là con số "direct" để so với chi phí blob-first (chỉ ~40 byte
+> commit). Xem [blob-first.md](blob-first.md) và mục cost-estimation.
+
+---
+
+## 1c. Hóa đơn Celestia THẬT được tính thế nào (API + công thức)
+
+Mục 1 dùng `DA_cost = bytes × TIA_PER_BYTE` — đó là **xấp xỉ tuyến tính do
+operator chỉnh**, tiện cho dashboard. Nhưng hóa đơn TIA operator thật sự trả cho
+Celestia **không tuyến tính theo byte**: Celestia tính **gas** theo *share*
+(khối 512 byte), rồi `fee = gas × gas_price`. Mục này nói rõ gọi API gì và công
+thức ra sao, để khi đặt `TIA_PER_BYTE` (mục 7) bạn biết mình đang xấp xỉ cái gì.
+
+### A. Gọi API nào
+
+ev-node publish blob qua **celestia-node JSON-RPC**, method `blob.Submit`:
+
+```
+blob.Submit(blobs []*Blob, opts *SubmitOptions) → height
+```
+
+| Tầng | Code | Việc |
+|------|------|------|
+| ev-node DA client | [`block/internal/da/client.go`](../../../../../block/internal/da/client.go) `Submit` | đóng gói data thành `Blob` (namespace + share version 0), gọi `blobAPI.Submit` |
+| JSON-RPC shape | [`pkg/da/jsonrpc/client.go`](../../../../../pkg/da/jsonrpc/client.go), [`submit_options.go`](../../../../../pkg/da/jsonrpc/submit_options.go) | bản sao JSON của `celestia-node/state.TxConfig` |
+| Celestia node | (process ngoài) | bọc blob vào tx **`MsgPayForBlobs` (PFB)**, ước lượng gas, ký, broadcast tới celestia-app validator |
+
+`SubmitOptions` (mirror `state.TxConfig`) điều khiển giá:
+
+```go
+type SubmitOptions struct {
+    GasPrice      float64 // utia/gas; chỉ áp dụng khi IsGasPriceSet=true
+    IsGasPriceSet bool
+    MaxGasPrice   float64 // trần khi để node tự định giá
+    Gas           uint64  // gas_limit; 0 = để node tự ước lượng
+    ...
+}
+```
+
+**Mặc định trong stack này:** `da_submitter` truyền `gasPrice = -1` nhưng client
+**bỏ qua tham số đó** (`func (c *client) Submit(... _ float64, ...)`), giá lấy
+hoàn toàn từ `config.DA.SubmitOptions` (JSON). Nếu không cấu hình → `Gas=0`,
+`IsGasPriceSet=false` → **celestia-node tự ước lượng cả gas lẫn gas price** (theo
+min-gas-price của node, chặn trên bởi `MaxGasPrice`). Operator muốn cố định thì
+set `gas_price` / `max_gas_price` / `gas` trong `SubmitOptions`.
+
+### B. Công thức gas (theo share, không theo byte)
+
+Celestia xếp data thành **share = 512 byte** (`ShareSize`). Mỗi share mất chỗ cho
+metadata nên không chứa đủ 512 byte payload:
+
+| Hằng (go-square / celestia-app) | Giá trị | Ý nghĩa |
+|---|---|---|
+| `ShareSize` | 512 | kích thước 1 share |
+| Namespace + info byte | 29 + 1 | header mỗi share |
+| Sequence length | 4 | chỉ ở share **đầu** của blob |
+| → payload share đầu | **478** | `512 − 29 − 1 − 4` |
+| → payload share tiếp | **482** | `512 − 29 − 1` |
+| `GasPerBlobByte` | 8 | gas mỗi byte-share |
+| `PFBGasFixedCost` | ~65 000 | phí cố định mỗi tx PFB |
+
+Số share cho 1 blob (làm tròn LÊN — đây là chỗ "không tuyến tính"):
+
+```
+shares(size) = 1 + ceil( max(0, size − 478) / 482 )      // blob ≤ 478B vẫn = 1 share
+```
+
+Gas của phần dữ liệu + phí cố định (≈ công thức `EstimateGas` của celestia-app):
+
+```
+gas_data  = Σ_blob ( shares(size) × 512 × 8 )            // GasPerBlobByte = 8
+gas_total = gas_data  +  PFBGasFixedCost (+ tx-size cost nhỏ)
+```
+
+### C. Phí = gas × giá
+
+```
+fee_utia = ceil( gas_total × gas_price )                 // gas_price tính bằng utia/gas
+```
+
+`gas_price` ≥ min-gas-price của mạng Celestia (mainnet hiện ~**0.002 utia/gas**;
+có thể cao hơn khi tắc nghẽn). `1 TIA = 1_000_000 utia`.
+
+### D. Vì sao `TIA_PER_BYTE × bytes` chỉ là xấp xỉ
+
+- **Lượng tử theo 512B:** blob 1 byte và blob 478 byte tốn **bằng nhau** (1 share).
+  Per-byte cost của blob nhỏ rất cao, của blob lớn mới hội tụ.
+- **Có phí cố định** (`PFBGasFixedCost`): blob càng nhỏ, phần cố định càng áp đảo
+  → đây chính là lý do blob-first **gom batch** (mục 3, "amortize"): chia một PFB
+  cho nhiều record.
+- **Cận tuyến tính khi blob lớn:** với blob lớn, per-byte → `512 × 8 / 482 × gas_price`
+  ≈ `8.5 gas/byte × gas_price`. Quy ra TIA:
+
+  ```
+  TIA_PER_BYTE_thực ≈ (8.5 × gas_price_utia) / 1_000_000          [TIA/byte]
+  ví dụ gas_price = 0.002 utia → ≈ 8.5 × 0.002 / 1e6 ≈ 1.7e-8 TIA/byte
+  ```
+
+  Mặc định `COSMOS_EXEC_TIA_PER_BYTE = 1e-7` (mục 1) đặt **cao hơn** con số này →
+  có biên an toàn cho phần cố định + biến động giá TIA. Đúng tinh thần checklist
+  mục 7: "đặt `TIA_PER_BYTE` sao cho fee thu ≥ hóa đơn Celestia (cộng biên)".
+
+> Lưu ý phiên bản: các hằng (`GasPerBlobByte=8`, `PFBGasFixedCost`,
+> `ShareSize=512`) là default của celestia-app (mirror tại celestia-node v0.28.4
+> trong [`pkg/da/jsonrpc`](../../../../../pkg/da/jsonrpc)). Có thể đổi theo
+> upgrade Celestia — kiểm tra `appconsts` của phiên bản đang chạy trước khi chốt
+> số cho production.
+
+---
+
 ## 2. Ai trả gì
 
 | Khoản | Cosmos chain thường (sovereign) | Rollup ev-node (bật fee) |

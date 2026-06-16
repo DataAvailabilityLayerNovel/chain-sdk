@@ -188,8 +188,11 @@ func (c *EnhancedExecutorClient) GetExecutionInfo(ctx context.Context) (executio
 }
 
 func (c *EnhancedExecutorClient) FilterTxs(ctx context.Context, txs [][]byte, maxBytes, maxGas uint64, hasForceIncludedTransaction bool) ([]execution.FilterStatus, error) {
+	// Connect-RPC JSON serializes protobuf enums as their string names
+	// (e.g. "FILTER_OK"), but older builds may emit numeric values, so accept
+	// both forms.
 	var resp struct {
-		Statuses []int `json:"statuses"`
+		Statuses []json.RawMessage `json:"statuses"`
 	}
 	err := c.connectCall(ctx, "FilterTxs", map[string]any{
 		"txs":                         txs,
@@ -201,10 +204,39 @@ func (c *EnhancedExecutorClient) FilterTxs(ctx context.Context, txs [][]byte, ma
 		return nil, err
 	}
 	result := make([]execution.FilterStatus, len(resp.Statuses))
-	for i, s := range resp.Statuses {
-		result[i] = execution.FilterStatus(s)
+	for i, raw := range resp.Statuses {
+		status, err := parseFilterStatus(raw)
+		if err != nil {
+			return nil, fmt.Errorf("statuses[%d]: %w", i, err)
+		}
+		result[i] = status
 	}
 	return result, nil
+}
+
+// filterStatusNames maps Connect-RPC JSON enum names to FilterStatus values.
+var filterStatusNames = map[string]execution.FilterStatus{
+	"FILTER_OK":       execution.FilterOK,
+	"FILTER_REMOVE":   execution.FilterRemove,
+	"FILTER_POSTPONE": execution.FilterPostpone,
+}
+
+// parseFilterStatus decodes a single FilterTxs status, accepting either the
+// protobuf JSON enum name ("FILTER_OK") or a numeric value.
+func parseFilterStatus(raw json.RawMessage) (execution.FilterStatus, error) {
+	var n int
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return execution.FilterStatus(n), nil
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil {
+		return 0, fmt.Errorf("decode status %s: %w", raw, err)
+	}
+	status, ok := filterStatusNames[name]
+	if !ok {
+		return 0, fmt.Errorf("unknown filter status %q", name)
+	}
+	return status, nil
 }
 
 // ── Optional interfaces (custom HTTP endpoints) ───────────────────────────

@@ -422,10 +422,10 @@ Cosmos chain **không modify** các component sau — dùng nguyên từ ev-node
 
 | Feature | File | Mô tả |
 |---------|------|-------|
-| Idempotent ExecuteTxs | [`execution/evm/execution.go:349-362`](execution/evm/execution.go) | Detect already-promoted blocks, resume in-progress payloads |
-| EVMStore with metadata | [`execution/evm/store.go`](execution/evm/store.go) | Track payload IDs, execution stages per height |
-| Gas estimation in FilterTxs | [`execution/evm/execution.go:862`](execution/evm/execution.go) | Pre-execute to estimate gas |
-| Tracing (OpenTelemetry) | [`execution/evm/engine_rpc_tracing.go`](execution/evm/engine_rpc_tracing.go) | Span tracing cho Engine API calls |
+| Idempotent ExecuteTxs | [`execution/evm/execution.go:349-362`](https://github.com/evstack/ev-node/blob/main/execution/evm/execution.go#L349-L362) | Detect already-promoted blocks, resume in-progress payloads |
+| EVMStore with metadata | [`execution/evm/store.go`](https://github.com/evstack/ev-node/blob/main/execution/evm/store.go) | Track payload IDs, execution stages per height |
+| Gas estimation in FilterTxs | [`execution/evm/execution.go:862`](https://github.com/evstack/ev-node/blob/main/execution/evm/execution.go#L862) | Pre-execute to estimate gas |
+| Tracing (OpenTelemetry) | [`execution/evm/engine_rpc_tracing.go`](https://github.com/evstack/ev-node/blob/main/execution/evm/engine_rpc_tracing.go) | Span tracing cho Engine API calls |
 
 ### Cosmos có mà EVM không có:
 
@@ -518,6 +518,6 @@ Testapp là **reference implementation đơn giản nhất** trong ev-node:
 | **ev-node interfaces** | | |
 | Executor Interface | [`core/execution/execution.go`](core/execution/execution.go) | 6 core + 3 optional interfaces |
 | **Reference implementations** | | |
-| EVM Executor | [`execution/evm/execution.go`](execution/evm/execution.go) | Engine API-based |
-| EVM Store | [`execution/evm/store.go`](execution/evm/store.go) | ExecMeta tracking |
-| Testapp KV | [`apps/testapp/kv/kvexecutor.go`](apps/testapp/kv/kvexecutor.go) | Simple KV store |
+| EVM Executor | [`execution/evm/execution.go`](https://github.com/evstack/ev-node/blob/main/execution/evm/execution.go) | Engine API-based |
+| EVM Store | [`execution/evm/store.go`](https://github.com/evstack/ev-node/blob/main/execution/evm/store.go) | ExecMeta tracking |
+| Testapp KV | [`apps/testapp/kv/kvexecutor.go`](https://github.com/evstack/ev-node/blob/main/apps/testapp/kv/kvexecutor.go) | Simple KV store |

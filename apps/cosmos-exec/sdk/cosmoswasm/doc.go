@@ -15,20 +15,21 @@ const (
 	DefaultExecAPIURL = "http://127.0.0.1:50051"
 	// Các path REST mà Client gọi tới. Hằng đặt ở 1 chỗ → sửa 1 lần, áp dụng
 	// mọi nơi (tránh "magic string" rải rác).
-	txSubmitPath     = "/tx/submit"
-	txResultPath     = "/tx/result"
-	querySmartPath   = "/wasm/query-smart"
-	blobSubmitPath   = "/blob/submit"
-	blobRetrievePath = "/blob/retrieve"
-	blobBatchPath    = "/blob/batch"
+	txSubmitPath   = "/tx/submit"
+	txResultPath   = "/tx/result"
+	statusPath     = "/status"
+	querySmartPath = "/wasm/query-smart"
 )
 
 // Client wraps the public HTTP endpoints exposed by cosmos-exec-grpc:
 //   - POST /tx/submit
 //   - GET  /tx/result
+//   - GET  /status            (node finality: latest vs finalized height)
 //   - POST /wasm/query-smart
-//   - POST /blob/submit       (blob-first data storage)
-//   - GET  /blob/retrieve     (fetch blob by commitment)
+//
+// Blob-first data (large off-chain data on Celestia DA) is handled by the
+// separate [BlobClient], which talks to a Celestia bridge directly — not
+// through cosmos-exec-grpc.
 //
 // Create via NewClient(url) for quick use, or NewClientFromConfig(SDKConfig{})
 // for full control over auth, retry, timeouts.

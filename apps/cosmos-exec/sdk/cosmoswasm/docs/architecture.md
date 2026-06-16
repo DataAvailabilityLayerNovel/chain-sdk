@@ -368,16 +368,7 @@ main()
 
 ---
 
-## 6. cmd/ — Other CLI Binaries
-
-| Binary | Path | Vai trò |
-|--------|------|---------|
-| `cosmos-exec` | `cmd/cosmos-exec/main.go` | Standalone executor (không có HTTP server) |
-| `dal-sdk` | `cmd/dal-sdk/main.go` | CLI tool: SDK operations (blob submit/retrieve, commit, query, start chain). Demo tool |
-
----
-
-## 7. apps/cosmos-wasm/ — Full Node Binary (evcosmos)
+## 6. apps/cosmos-wasm/ — Full Node Binary (evcosmos)
 
 Binary riêng chạy rollup full node. Kết nối tới executor qua gRPC.
 
@@ -402,7 +393,7 @@ Binary riêng chạy rollup full node. Kết nối tới executor qua gRPC.
 
 ---
 
-## 8. scripts/ — Dev Scripts
+## 7. scripts/ — Dev Scripts
 
 | Script | Vai trò |
 |--------|---------|

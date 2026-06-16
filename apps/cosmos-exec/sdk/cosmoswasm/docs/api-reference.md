@@ -2,9 +2,22 @@
 
 All methods below are public stable API. Breaking changes require a major version bump.
 
+## Who each API is for
+
+The SDK serves two distinct audiences. Every section below is tagged with the role it targets:
+
+| Tag | Audience | What they do |
+|-----|----------|--------------|
+| 👤 **App dev / chain user** | Application developers and end users interacting with the chain | Submit transactions, store/retrieve blobs, query contract state, build & sign txs |
+| 🛠️ **Node operator** | Operators running the executor, DA, and local chain infrastructure | Configure DA namespaces, run local DAL chains, wire up transports |
+
+Most APIs are for **app devs / chain users**. The DA Layer and Dev Tooling sections are primarily for **node operators**. Client Setup and Errors apply to both.
+
 ---
 
 ## Client Setup
+
+> 👤 **App dev / chain user** &nbsp;·&nbsp; 🛠️ **Node operator** — connection setup used by both roles.
 
 ### `NewClient(baseURL) → *Client`
 
@@ -86,6 +99,8 @@ secureClient := client.WithHTTPClient(tlsClient)
 ---
 
 ## Transaction APIs
+
+> 👤 **App dev / chain user** — submit signed transactions to the chain and track their execution.
 
 ### `SubmitTxBytes(ctx, txBytes) → (*SubmitTxResponse, error)`
 
@@ -233,6 +248,8 @@ fmt.Printf("success at height %d\n", result.Height)
 ---
 
 ## Blob APIs
+
+> 👤 **App dev / chain user** — store and retrieve arbitrary data in the executor blob store, then anchor commitments on-chain.
 
 ### `SubmitBlob(ctx, data) → (*BlobSubmitResponse, error)`
 
@@ -394,6 +411,8 @@ Same as `CommitRoot` but intended for events that must be submitted immediately 
 
 ## Query APIs
 
+> 👤 **App dev / chain user** — read contract state without submitting a transaction.
+
 ### `QuerySmart(ctx, contract, msg) → (map[string]any, error)`
 
 **Purpose:** Execute a read-only WASM smart query against contract state.
@@ -434,6 +453,8 @@ Returns the raw response without parsing:
 ---
 
 ## Transaction Builders
+
+> 👤 **App dev / chain user** — construct the tx bytes you later submit with the Transaction APIs.
 
 These build protobuf-encoded `TxRaw` bytes locally (no network call).
 
@@ -491,6 +512,8 @@ Encode tx bytes as hex. Use when submitting via `tx_hex` JSON field.
 ---
 
 ## Data Integrity
+
+> 👤 **App dev / chain user** — build/verify Merkle proofs and chunk/compress blob data.
 
 ### `GetProof(commitments, leafIndex) → (*MerkleProof, error)`
 
@@ -552,6 +575,8 @@ Decompress if gzipped, otherwise passthrough. Safe on any input.
 
 ## Cost Estimation
 
+> 👤 **App dev / chain user** — estimate and compare gas costs before submitting.
+
 ### `EstimateCost(req) → *CostEstimate`
 
 **Purpose:** Compare gas cost of storing data two ways: direct on-chain vs blob-first.
@@ -596,6 +621,8 @@ est := cosmoswasm.EstimateCost(req)
 ---
 
 ## Batch Builder
+
+> 👤 **App dev / chain user** — accumulate many blobs and auto-flush them as batched on-chain commits.
 
 ### `NewBatchBuilder(client, cfg) → *BatchBuilder`
 
@@ -696,6 +723,8 @@ Total byte size of queued blobs.
 
 ## DA Layer
 
+> 🛠️ **Node operator** (and advanced app devs) — configure DA namespaces and transports, and submit/retrieve blobs directly against the DA layer.
+
 ### Namespace
 
 ```go
@@ -778,6 +807,8 @@ bridge := cosmoswasm.NewDABridge(daClient, execClient, cosmoswasm.NamespaceFromS
 
 ## Errors
 
+> 👤 **App dev / chain user** &nbsp;·&nbsp; 🛠️ **Node operator** — error types returned across all APIs.
+
 ### `SDKError`
 
 All SDK public methods return `*SDKError` (or `nil`). It wraps a root cause with context and a suggested action.
@@ -818,6 +849,8 @@ Match with `errors.Is(err, cosmoswasm.ErrXxx)`:
 ---
 
 ## Testing Mocks
+
+> 👤 **App dev / chain user** — in-memory mocks for testing app code without a running node.
 
 ### `NewMockClient() → *MockExecutorClient`
 
@@ -881,6 +914,8 @@ daMock.InjectBlobs(ns, 50, []*cosmoswasm.DABlob{
 ---
 
 ## Dev Tooling
+
+> 🛠️ **Node operator** — launch and manage local chain/node infrastructure from Go.
 
 These are for local development and integration testing. May change between minor versions.
 

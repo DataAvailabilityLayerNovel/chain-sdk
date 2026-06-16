@@ -172,6 +172,16 @@ func WithPersistence(dir string, initErr *error) Option {
 			e.chainID = meta.ChainID
 			e.lastHeight = meta.LastHeight
 			e.finalizedHeight = meta.FinalizedHeight
+			// Restore BaseApp's chain ID after a restart. InitChain (which
+			// normally calls SetChainID) is NOT re-run on an already-initialized
+			// chain, so without this BaseApp keeps its empty default and the ante
+			// handler verifies signatures against chain-id "" — making every
+			// signed tx fail with "signature verification failed ... chain-id ()".
+			// VI: khôi phục chain id cho BaseApp sau restart, nếu không ante
+			// handler dùng chain-id rỗng → mọi tx đã ký đều fail.
+			if e.chainID != "" && e.app != nil {
+				baseapp.SetChainID(e.chainID)(e.app.BaseApp)
+			}
 			if meta.StateRoot != "" {
 				root, decErr := hexDecode(meta.StateRoot) // hex -> bytes.
 				if decErr != nil {

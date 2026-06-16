@@ -191,6 +191,75 @@ func (c *Client) WaitTxResult(ctx context.Context, txHash string, pollInterval t
 	}
 }
 
+// Status: GET /status — trả NodeStatus của node (latest_height +
+// finalized_height...). Đây là building block để phân biệt soft vs DA-final:
+// caller (hoặc GetTxFinality/WaitTxFinality) so block height của tx với 2 mốc này.
+func (c *Client) Status(ctx context.Context) (*NodeStatus, error) {
+	res := NodeStatus{}
+	if err := c.doJSON(ctx, http.MethodGet, statusPath, nil, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// GetTxFinality: trả mức finality hiện tại của 1 tx kèm kết quả thực thi.
+//   - FinalityUnknown : chưa thấy tx (Found=false) → result = nil.
+//   - FinalitySoft    : tx đã vào block nhưng block chưa DA-final.
+//   - FinalityDA      : block chứa tx đã DA-finalized.
+// Tốn 2 request: /tx/result rồi /status. Finality là snapshot tại thời điểm gọi
+// — muốn theo dõi chuyển soft→DA thì gọi lại hoặc dùng WaitTxFinality.
+func (c *Client) GetTxFinality(ctx context.Context, txHash string) (FinalityLevel, *TxExecutionResult, error) {
+	res, err := c.GetTxResult(ctx, txHash)
+	if err != nil {
+		return FinalityUnknown, nil, err
+	}
+	if !res.Found || res.Result == nil {
+		return FinalityUnknown, nil, nil
+	}
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		return FinalityUnknown, res.Result, err
+	}
+
+	if res.Result.Height <= status.FinalizedHeight {
+		return FinalityDA, res.Result, nil
+	}
+	return FinalitySoft, res.Result, nil
+}
+
+// WaitTxFinality: POLL cho tới khi tx đạt mức finality >= want (hoặc ctx huỷ).
+// Vd: WaitTxFinality(ctx, hash, FinalityDA, time.Second) chặn tới khi block chứa
+// tx được DA xác nhận — dùng cho luồng giá trị cao (rút tiền, bridge). want =
+// FinalitySoft tương đương WaitTxResult nhưng trả thêm thông tin mức finality.
+func (c *Client) WaitTxFinality(ctx context.Context, txHash string, want FinalityLevel, pollInterval time.Duration) (*TxExecutionResult, error) {
+	if want <= FinalityUnknown {
+		want = FinalitySoft // chờ "thấy tx" là tối thiểu có ý nghĩa.
+	}
+	if pollInterval <= 0 {
+		pollInterval = 1 * time.Second
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		level, result, err := c.GetTxFinality(ctx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if level >= want {
+			return result, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // QuerySmartRaw: gọi /wasm/query-smart và trả response thô (data + data_raw).
 // msg `any`: chấp nhận map, struct hay []byte JSON đã marshal — NormalizeJSONMsg
 // chuẩn hoá về json.RawMessage.

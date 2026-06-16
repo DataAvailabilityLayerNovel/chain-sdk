@@ -25,6 +25,7 @@ require (
 	github.com/hashicorp/raft-boltdb v0.0.0-20251103221153-05f9dd7a5148
 	github.com/ipfs/go-datastore v0.9.1
 	github.com/ipfs/go-ds-badger4 v0.1.8
+	github.com/ipfs/go-log/v2 v2.9.1
 	github.com/libp2p/go-libp2p v0.47.0
 	github.com/libp2p/go-libp2p-kad-dht v0.38.0
 	github.com/libp2p/go-libp2p-pubsub v0.15.0
@@ -86,7 +87,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ipfs/boxo v0.36.0 // indirect
 	github.com/ipfs/go-cid v0.6.0 // indirect
-	github.com/ipfs/go-log/v2 v2.9.1 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect

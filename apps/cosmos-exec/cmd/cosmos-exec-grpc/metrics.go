@@ -12,13 +12,16 @@ import (
 
 // Metrics tracks request counts and latencies in a lock-free manner.
 // Exposed via /metrics in Prometheus-compatible text format.
+//
+// VI: bộ đếm metrics dùng atomic (không cần khoá mutex → an toàn khi nhiều
+// goroutine HTTP cùng tăng). Phơi ra qua /metrics (text Prometheus) và
+// /metrics.json (JSON).
 type Metrics struct {
-	requestCount    atomic.Int64
-	errorCount      atomic.Int64
-	txSubmitCount   atomic.Int64
-	blobSubmitCount atomic.Int64
-	queryCount      atomic.Int64
-	startTime       time.Time
+	requestCount  atomic.Int64
+	errorCount    atomic.Int64
+	txSubmitCount atomic.Int64
+	queryCount    atomic.Int64
+	startTime     time.Time // mốc khởi động, để tính uptime
 }
 
 func newMetrics() *Metrics {
@@ -28,10 +31,12 @@ func newMetrics() *Metrics {
 func (m *Metrics) incRequest()    { m.requestCount.Add(1) }
 func (m *Metrics) incError()      { m.errorCount.Add(1) }
 func (m *Metrics) incTxSubmit()   { m.txSubmitCount.Add(1) }
-func (m *Metrics) incBlobSubmit() { m.blobSubmitCount.Add(1) }
 func (m *Metrics) incQuery()      { m.queryCount.Add(1) }
 
 // metricsCountingMiddleware increments request/error counters.
+//
+// VI: middleware đếm tổng request và số lỗi. Bọc ResponseWriter bằng
+// statusRecorder để "nghe lén" status code trả về (>=400 thì tính là lỗi).
 func metricsCountingMiddleware(next http.Handler, m *Metrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.incRequest()
@@ -43,17 +48,24 @@ func metricsCountingMiddleware(next http.Handler, m *Metrics) http.Handler {
 	})
 }
 
+// statusRecorder bọc http.ResponseWriter chỉ để ghi nhớ status code đã ghi
+// (ResponseWriter chuẩn không cho đọc lại code đã set).
 type statusRecorder struct {
 	http.ResponseWriter
 	statusCode int
 }
 
+// WriteHeader: lưu code rồi uỷ quyền cho ResponseWriter gốc.
 func (r *statusRecorder) WriteHeader(code int) {
 	r.statusCode = code
 	r.ResponseWriter.WriteHeader(code)
 }
 
 // metricsHandler serves Prometheus-style text metrics.
+//
+// VI: trả metrics dạng text Prometheus. Mỗi chỉ số gồm 3 dòng: # HELP (mô tả),
+// # TYPE (counter=tăng dần / gauge=giá trị tức thời), rồi dòng giá trị. Gộp số
+// đếm HTTP (atomic) với thống kê từ executor (GetStats: mempool, blocks...).
 func metricsHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats := exec.GetStats()
@@ -76,10 +88,6 @@ func metricsHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerFunc 
 		fmt.Fprintf(w, "# TYPE cosmos_exec_tx_submits_total counter\n")
 		fmt.Fprintf(w, "cosmos_exec_tx_submits_total %d\n", m.txSubmitCount.Load())
 
-		fmt.Fprintf(w, "# HELP cosmos_exec_blob_submits_total Total blob submit requests.\n")
-		fmt.Fprintf(w, "# TYPE cosmos_exec_blob_submits_total counter\n")
-		fmt.Fprintf(w, "cosmos_exec_blob_submits_total %d\n", m.blobSubmitCount.Load())
-
 		fmt.Fprintf(w, "# HELP cosmos_exec_queries_total Total smart query requests.\n")
 		fmt.Fprintf(w, "# TYPE cosmos_exec_queries_total counter\n")
 		fmt.Fprintf(w, "cosmos_exec_queries_total %d\n", m.queryCount.Load())
@@ -99,6 +107,9 @@ func metricsHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerFunc 
 }
 
 // metricsJSONHandler serves metrics as JSON (for non-Prometheus consumers).
+//
+// VI: cùng số liệu nhưng trả JSON, cho consumer không đọc định dạng Prometheus
+// (vd dashboard tự viết).
 func metricsJSONHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats := exec.GetStats()
@@ -108,7 +119,6 @@ func metricsJSONHandler(exec *executor.CosmosExecutor, m *Metrics) http.HandlerF
 			"requests_total":   m.requestCount.Load(),
 			"errors_total":     m.errorCount.Load(),
 			"tx_submits_total": m.txSubmitCount.Load(),
-			"blob_submits":     m.blobSubmitCount.Load(),
 			"queries_total":    m.queryCount.Load(),
 			"tx_results":       stats.TxResultCount,
 			"blocks":           stats.BlockCount,

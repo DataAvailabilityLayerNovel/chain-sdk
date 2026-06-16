@@ -111,14 +111,19 @@ func BuildExecuteTx(req ExecuteTxRequest) ([]byte, error) {
 //
 // The contract message sent is:
 //
-//	{"record_blob": {"commitment": "<hex>", "tag": "<tag>", ...extra}}
+//	{"record_blob": {"commitment": "<hex>", "height": <da_height>,
+//	                 "namespace": "<hex>", "tag": "<tag>", ...extra}}
 //
-// Your WASM contract must handle a "record_blob" execute message.
+// Your WASM contract must handle a "record_blob" execute message. Recording
+// `height` (and `namespace`) on-chain is what lets anyone later retrieve the
+// blob from Celestia via Blob.Get(height, namespace, commitment) — commitment
+// alone is not enough.
 //
-// VI: build tx ghi 1 "blob commitment" (cam kết 32 byte) vào contract WASM.
-// Mô hình "blob-first": dữ liệu LỚN nằm trong blob store (ngoài state WASM),
-// CHỈ commitment được ghi on-chain → tiết kiệm gas + giảm phình state.
-// Contract WASM PHẢI có handler "record_blob".
+// VI: build tx ghi 1 "blob commitment" (cam kết Celestia) vào contract WASM.
+// Mô hình "blob-first": dữ liệu LỚN nằm trên Celestia (ngoài state WASM), CHỈ
+// commitment + height được ghi on-chain → tiết kiệm gas + giảm phình state.
+// Ghi cả `height` (và `namespace`) vì retrieve cần đủ (height, namespace,
+// commitment). Contract WASM PHẢI có handler "record_blob".
 func BuildBlobCommitTx(req BlobCommitTxRequest) ([]byte, error) {
 	commitment := strings.TrimSpace(req.Commitment)
 	if commitment == "" {
@@ -132,6 +137,13 @@ func BuildBlobCommitTx(req BlobCommitTxRequest) ([]byte, error) {
 	// inner: payload bên trong khoá "record_blob".
 	inner := map[string]any{
 		"commitment": commitment,
+	}
+	// height/namespace là khoá để retrieve blob từ Celestia sau này.
+	if req.Height > 0 {
+		inner["height"] = req.Height
+	}
+	if ns := strings.TrimSpace(req.Namespace); ns != "" {
+		inner["namespace"] = ns
 	}
 	if tag := strings.TrimSpace(req.Tag); tag != "" {
 		inner["tag"] = tag
@@ -150,7 +162,7 @@ func BuildBlobCommitTx(req BlobCommitTxRequest) ([]byte, error) {
 }
 
 // BuildBatchRootTx builds a WASM execute transaction that records a Merkle
-// batch root in a CosmWasm contract.  This is the on-chain half of CommitRoot:
+// batch root in a CosmWasm contract.  This is the on-chain half of SubmitBatch:
 // N blobs stored off-chain, one 32-byte root written to the contract.
 //
 // The contract message sent is:
@@ -174,6 +186,13 @@ func BuildBatchRootTx(req BatchRootTxRequest) ([]byte, error) {
 	inner := map[string]any{
 		"root":  root,
 		"count": req.Count, // số blob trong batch (để contract verify cây).
+	}
+	// height là khoá để retrieve các blob của batch từ Celestia sau này.
+	if req.Height > 0 {
+		inner["height"] = req.Height
+	}
+	if ns := strings.TrimSpace(req.Namespace); ns != "" {
+		inner["namespace"] = ns
 	}
 	if tag := strings.TrimSpace(req.Tag); tag != "" {
 		inner["tag"] = tag
