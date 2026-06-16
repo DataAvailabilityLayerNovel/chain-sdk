@@ -6,6 +6,23 @@ Câu trả lời ngắn: **ở throughput thực tế thì rẻ hơn rõ rệt; 
 
 > Liên quan: [sequencer-security.md](sequencer-security.md) (mô hình không validator), [cosmos-vs-evnode.md](cosmos-vs-evnode.md), [configuration.md](configuration.md).
 
+## Mục lục
+
+- 1. Mô hình chi phí thật của rollup
+- 1b. Hàm ước lượng phí: `/tx/estimate` vs `/tx/simulate`
+- 1c. Hóa đơn Celestia THẬT được tính thế nào
+- 2. Ai trả gì
+- 3. Tổng chi phí vận hành rollup / tháng
+- 4. Điểm hòa vốn
+- 5. Đòn bẩy giảm phí
+- 6. Cách bật fee thật
+- 6b. Faucet / cấp vốn (A+B đã implement)
+- 6c. Tích hợp Web/UI (nút "Get test tokens")
+- 6d. Sweep phí cuối block về treasury
+- 7. Checklist production có fee
+- 8. Kết luận
+- Tham chiếu code
+
 ---
 
 ## 1. Mô hình chi phí thật của rollup

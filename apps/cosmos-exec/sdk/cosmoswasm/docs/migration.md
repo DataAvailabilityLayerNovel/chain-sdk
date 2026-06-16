@@ -1,65 +1,55 @@
 # Migration Guide
 
-## v0.2 to v0.3
+## Refactor `ea844067` — tầng blob/DA mới
 
-### Internal package separation
+Refactor lớn (commit `ea844067`) thay tầng blob/DA cũ bằng `BlobClient` +
+Merkle helpers, và tách chi tiết cài đặt vào `internal/`. Đây là điểm quan
+trọng nhất khi nâng cấp code cũ.
 
-Implementation details have moved to `internal/` subpackages. **If your code only imports `cosmoswasm`**, nothing changes. If you were reaching into unexported helpers, here is what moved:
+### API đã GỠ → thay bằng gì
 
-| Before (v0.2)                              | After (v0.3)                         |
-|--------------------------------------------|--------------------------------------|
-| `buildProtoTxBytes()` (unexported in tx.go)| `internal/txcodec.BuildProtoTxBytes` |
-| `normalizeJSONMsg()` (unexported in tx.go) | `internal/txcodec.NormalizeJSONMsg`  |
-| chain runner logic in `chain.go`           | `internal/devchain`                  |
-| Merkle tree construction                   | `internal/merkle`                    |
-| gzip helpers (internals)                   | `internal/compress`                  |
-| blob chunking (internals)                  | `internal/chunk`                     |
+| API cũ (đã gỡ) | Thay bằng |
+|----------------|-----------|
+| `DAClient` (interface), `DABridge`, `NewDABridge`, `DANamespaceConfig` | `BlobClient` — `NewBlobClient(BlobClientConfig)` + `SubmitBlob` / `RetrieveBlob` / `SubmitBatch` / `VerifyBlob` |
+| `BatchBuilder`, `NewBatchBuilder`, `DefaultBatchBuilderConfig` | Gom blob thủ công + `BlobClient.SubmitBatch` |
+| `CommitRoot`, `CommitCritical` | `SubmitBatch` → `BuildBatchRootTx` → `SubmitTxBytes` (2 bước rõ ràng) |
+| `EstimateCost`, `DefaultEstimateCostRequest` | Tự tính theo công thức trong [fee-economics.md](fee-economics.md) |
+| `GetProof(commitments, i)` | `BuildMerkleProof(commitments, index)` |
+| `RetrieveBlobData(commitment)` | `RetrieveBlob(ctx, height, commitmentHex)` (cần thêm `height`) |
+| `NewMockClient`, `MockExecutorClient`, `NewMockDAClient`, `MockDAClient` | Test qua `httptest` hoặc `StartDALChain` |
 
-Go's `internal/` rule means external modules **cannot** import these packages. This is intentional — it lets us refactor internals without breaking your code.
+> ⚠️ **Quan trọng về retrieve:** blob giờ nằm trên Celestia. Để lấy lại cần
+> **cả `height` lẫn `commitment`** — vì vậy `BuildBlobCommitTx`/`BuildBatchRootTx`
+> ghi thêm `Height` (và `Namespace`) on-chain.
 
-### Gas constants unexported
+### Tách package internal
 
-The following constants were public in v0.2 but are now unexported (lowercase):
+Chi tiết cài đặt đã chuyển vào các subpackage `internal/`. **Nếu code chỉ import
+`cosmoswasm`** thì không đổi gì. Go enforce: external module **không** import
+được `internal/` — chủ đích, để refactor nội bộ không phá code bạn.
 
-- `CelestiaFixedGas` / `CelestiaGasPerByte` / `CelestiaShareSize`
-- `CosmosBaseTxGas` / `CosmosGasPerMsgByte` / `CosmosGasPerStoreByte`
+| Nội dung | Vị trí mới |
+|----------|------------|
+| Encode protobuf tx | `internal/txcodec` |
+| Dựng cây Merkle | `internal/merkle` |
+| gzip helpers (nội bộ) | `internal/compress` |
+| Chunk blob (nội bộ) | `internal/chunk` |
+| Chạy chain local | `internal/devchain` |
 
-**Why:** These are implementation details of `EstimateCost()`. If Celestia updates its gas model, we can adjust them without a major version bump. If you referenced these constants directly, use `EstimateCost()` instead — it encapsulates the gas model.
+### Phân tầng API
 
-### New additions (non-breaking)
+Toàn bộ symbol export chia 3 tier (xem `go doc cosmoswasm` hoặc [README](README.md#function-map-public-api-thật)):
 
-| Symbol | What |
-|--------|------|
-| `DAClient` interface | Celestia DA layer abstraction |
-| `DABridge`, `NewDABridge` | High-level DA + executor bridge |
-| `MockDAClient`, `NewMockDAClient` | In-memory DA mock for tests |
-| `DALChainConfig.Validate()` | Config validation before starting chain |
-| `BatchBuilder` | Auto-flush blob accumulator |
-| `SDKError` | Structured errors with Op, Cause, Hint |
-| `CommitCritical` | Like CommitRoot but returns error on partial failure |
+- **Tier 1 (Core)** — bắt đầu ở đây: `NewClient`/`NewClientFromConfig`, `SubmitTxBytes`/`WaitTxResult`, `QuerySmart`, `NewBlobClient`/`SubmitBlob`/`SubmitBatch`, `BuildBatchRootTx`.
+- **Tier 2 (Power-user)** — khi cần: tx builder, `Signer` + signed builder, namespace, Merkle, chunk, compress.
+- **Tier 3 (Dev tooling)** — có thể đổi giữa minor version: `StartDALChain` + local chain runner.
 
-### API tier classification
+Tier 1 + 2 là hợp đồng ổn định. Tier 3 và `internal/` có thể đổi ở minor release.
 
-All exported symbols are now classified into three tiers (see `go doc cosmoswasm`):
+## Lộ trình v1.0
 
-- **Tier 1 (Core)** — stable, start here: `NewClient`, `SubmitBlob`, `CommitRoot`, etc.
-- **Tier 2 (Power-user)** — stable, use when needed: tx builders, namespace, DA, Merkle.
-- **Tier 3 (Dev tooling)** — may change between minor versions: mocks, local chain runner.
+Khi SDK đạt v1.0:
 
-Tier 1 + 2 are the stability contract. Tier 3 may change in minor releases.
-
-## Future: v1.0 plan
-
-When the SDK reaches v1.0, the following commitments apply:
-
-- **Tier 1 and Tier 2** become the long-term stable API. Breaking changes require a new major version.
-- **Tier 3** (mocks, dev chain runner) remains flexible between minor versions.
-- **`internal/`** packages can change freely — they are not importable by external code.
-
-### Migration checklist for v1.0 (when released)
-
-1. Replace any `NewClient("http://...")` calls with `NewClientFromConfig(SDKConfig{...})` for production use.
-2. Use `SDKError` and sentinel errors (`ErrNotReachable`, `ErrTxFailed`, etc.) for structured error handling.
-3. Use `BatchBuilder` instead of manual loop + `SubmitBlob` for high-throughput workloads.
-4. Use `DABridge.SubmitAndCommit` instead of separate DA + executor calls.
-5. Remove any references to unexported gas constants — use `EstimateCost()`.
+- **Tier 1 và Tier 2** thành API ổn định dài hạn — breaking change cần major version mới.
+- **Tier 3** (dev chain runner) vẫn linh hoạt giữa các minor version.
+- **`internal/`** đổi tự do — external không import được.

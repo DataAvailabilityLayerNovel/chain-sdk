@@ -10,6 +10,21 @@ Hướng dẫn từ đầu đến cuối cho developer muốn:
 
 ---
 
+## Mục lục
+
+- Phase 1 — Chuẩn bị môi trường
+- Phase 2 — Viết và compile CosmWasm contract
+- Phase 3 — Tạo Go project sử dụng SDK
+- Phase 4 — Start chain
+- Phase 4.5 — Cấu hình DA Start Height & Query Celestia
+- Phase 5 — Deploy contract + Interact
+- Phase 6 (Optional) — Chạy không cần Celestia (dev mode)
+- Phase 7 (Optional) — Swagger UI & API Explorer
+- Tóm tắt: tất cả files cần tạo
+- Tóm tắt flow
+- Troubleshooting
+- What's next
+
 ## Phase 1 — Chuẩn bị môi trường
 
 ### 1.1. Cài đặt tools
@@ -281,7 +296,7 @@ ls -lh artifacts/my_counter.wasm
 ```
 
 > **Chưa có contract?** Có thể skip bước này và chỉ dùng blob/query features trước.
-> Xem [examples/quickstart](../examples/quickstart/) — không cần contract.
+> Xem [examples/game-telemetry](../examples/game-telemetry/) — blob-first end-to-end.
 
 #### Bước 5: Tạo file .env
 
@@ -337,24 +352,36 @@ func main() {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
-    // Test 1: Submit blob
-    res, err := client.SubmitBlob(ctx, []byte("Hello from my-dapp!"))
+    // Test 1: smoke test — kết nối executor
+    status, err := client.Status(ctx)
+    if err != nil {
+        log.Fatalf("status failed: %v", err)
+    }
+    fmt.Printf("Connected! chain=%s height=%d\n", status.ChainID, status.LatestHeight)
+
+    // Test 2: blob-first (cần Celestia bridge) — SubmitBlob/RetrieveBlob nằm
+    // trên BlobClient (JSON-RPC tới Celestia), KHÔNG phải Client.
+    bc, err := cosmoswasm.NewBlobClient(ctx, cosmoswasm.BlobClientConfig{
+        BridgeRPC: "http://localhost:26658",
+        Namespace: "my-dapp",
+    })
+    if err != nil {
+        log.Fatalf("blob client: %v", err)
+    }
+    defer bc.Close()
+
+    res, err := bc.SubmitBlob(ctx, []byte("Hello from my-dapp!"))
     if err != nil {
         log.Fatalf("submit blob failed: %v", err)
     }
-    fmt.Printf("Blob stored! commitment: %s\n", res.Commitment)
+    fmt.Printf("Blob stored! commitment=%s height=%d\n", res.Commitment, res.Height)
 
-    // Test 2: Retrieve blob
-    data, err := client.RetrieveBlobData(ctx, res.Commitment)
+    // Retrieve cần CẢ height lẫn commitment
+    data, err := bc.RetrieveBlob(ctx, res.Height, res.Commitment)
     if err != nil {
         log.Fatalf("retrieve blob failed: %v", err)
     }
     fmt.Printf("Retrieved: %s\n", string(data))
-
-    // Test 3: Cost estimate
-    est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: 1024})
-    fmt.Printf("1KB on-chain: %d gas, blob-first: %d gas (%.0f%% cheaper)\n",
-        est.DirectTx.TotalGas, est.BlobCommit.TotalGas, est.SavingsPercent)
 }
 ```
 
@@ -910,39 +937,46 @@ func main() {
         []byte(`{"event":"game_end","ts":3,"score":9999}`),
     }
 
-    receipt, err := client.CommitRoot(ctx, cosmoswasm.CommitRootRequest{
-        Blobs:    events,
-        Contract: contractAddr,
-        Tag:      "game-events",
+    // 5a. Upload N event lên Celestia trong 1 batch (qua BlobClient)
+    bc, err := cosmoswasm.NewBlobClient(ctx, cosmoswasm.BlobClientConfig{
+        BridgeRPC: "http://localhost:26658",
+        Namespace: "game-events",
     })
     if err != nil {
-        log.Fatalf("commit root: %v", err)
+        log.Fatalf("blob client: %v", err)
     }
-    fmt.Printf("  merkle_root: %s\n", receipt.Root)
-    fmt.Printf("  tx_hash: %s\n", receipt.TxHash)
-    fmt.Printf("  blobs stored: %d (off-chain)\n", len(receipt.Refs))
+    defer bc.Close()
 
-    // Verify Merkle proof
-    commitments := make([]string, len(receipt.Refs))
-    for i, ref := range receipt.Refs {
-        commitments[i] = ref.Commitment
+    batch, err := bc.SubmitBatch(ctx, events)
+    if err != nil {
+        log.Fatalf("submit batch: %v", err)
     }
-    proof, _ := cosmoswasm.GetProof(commitments, 0)
+    fmt.Printf("  merkle_root: %s (height=%d, %d blobs)\n", batch.Root, batch.Height, batch.Count)
+
+    // 5b. Ghi root on-chain (chỉ 1 tx cho N blob)
+    rootTx, _ := cosmoswasm.BuildBatchRootTx(cosmoswasm.BatchRootTxRequest{
+        Contract:  contractAddr,
+        Root:      batch.Root,
+        Height:    batch.Height,
+        Namespace: bc.Namespace(),
+        Count:     batch.Count,
+        Tag:       "game-events",
+    })
+    rootResp, err := client.SubmitTxBytes(ctx, rootTx)
+    if err != nil {
+        log.Fatalf("commit root tx: %v", err)
+    }
+    fmt.Printf("  root recorded on-chain, tx_hash: %s\n", rootResp.Hash)
+
+    // 5c. Verify Merkle proof (offline)
+    proof, _ := cosmoswasm.BuildMerkleProof(batch.Commitments, 0)
     if err := cosmoswasm.VerifyMerkleProof(proof); err != nil {
         log.Fatalf("proof invalid: %v", err)
     }
     fmt.Println("  merkle proof verified")
 
-    // ──────────────────────────────────────────────────────────
-    // Step 6: Cost comparison
-    // ──────────────────────────────────────────────────────────
-    fmt.Println("\nStep 6 — Cost comparison (1 MB data)")
-
-    est := cosmoswasm.EstimateCost(cosmoswasm.EstimateCostRequest{DataBytes: 1024 * 1024})
-    fmt.Printf("  direct on-chain: %d gas\n", est.DirectTx.TotalGas)
-    fmt.Printf("  blob + commit:   %d gas (%.0f%% cheaper)\n", est.BlobCommit.TotalGas, est.SavingsPercent)
-
     fmt.Println("\nAll steps passed.")
+    // So sánh chi phí on-chain vs blob-first: xem fee-economics.md
 }
 
 func findEventValue(events []cosmoswasm.TxEvent, key string) string {
@@ -1016,14 +1050,15 @@ export DA_NAMESPACE=test
 go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy
 ```
 
-Hoặc chạy quickstart example (chỉ blob + proof, không cần contract):
+Hoặc chạy một example có sẵn (`dapp-chain`, `dapp-chain-deploy`,
+`forced-inclusion`, `game-telemetry`):
 
 ```bash
 # Start chain trước (terminal 1)
 go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true
 
-# Chạy quickstart (terminal 2)
-go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/quickstart
+# Chạy example (terminal 2)
+go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/game-telemetry
 ```
 
 ---
@@ -1050,7 +1085,10 @@ Mở trình duyệt tại `http://127.0.0.1:50051/swagger` → giao diện Swagg
 | **node** | `GET /status`, `GET /blocks/latest`, `GET /blocks/{height}` | Trạng thái chain, thông tin block |
 | **tx** | `POST /tx/submit`, `GET /tx/{hash}`, `GET /tx/result`, `GET /tx/pending` | Submit và tra cứu transaction |
 | **wasm** | `POST /wasm/query-smart` | Query CosmWasm smart contract (read-only) |
-| **blob** | `POST /blob/submit`, `GET /blob/retrieve`, `POST /blob/batch`, `POST /blob/estimate-cost` | Blob storage, batch, cost estimation |
+| **account** | `GET /auth/account/{address}`, `GET /bank/balance/{address}` | Account number/sequence, số dư |
+
+> Lưu ý: **không có** endpoint `/blob/*` trên cosmos-exec-grpc. Blob-first đi
+> thẳng tới Celestia qua `BlobClient` (JSON-RPC), không qua HTTP của server này.
 
 ### 7.3. Test API từ Swagger UI
 
@@ -1070,21 +1108,16 @@ Mở trình duyệt tại `http://127.0.0.1:50051/swagger` → giao diện Swagg
 }
 ```
 
-**Ví dụ 2 — Submit blob:**
-1. Tìm `POST /blob/submit` trong nhóm **blob**
-2. Click **Try it out**
-3. Nhập body:
+**Ví dụ 2 — Tra account (peek number cho địa chỉ mới):**
+1. Tìm `GET /auth/account/{address}` trong nhóm **account**
+2. Nhập một bech32 address → **Execute**
+3. Response:
 ```json
 {
-  "data_base64": "SGVsbG8gV29ybGQ="
-}
-```
-4. Click **Execute**
-5. Response:
-```json
-{
-  "commitment": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
-  "size": 11
+  "address": "cosmos1...",
+  "account_number": 7,
+  "sequence": 0,
+  "exists": false
 }
 ```
 
@@ -1104,15 +1137,10 @@ Mở trình duyệt tại `http://127.0.0.1:50051/swagger` → giao diện Swagg
 }
 ```
 
-**Ví dụ 4 — Estimate cost (so sánh on-chain vs blob):**
-1. Tìm `POST /blob/estimate-cost`
-2. Nhập body:
-```json
-{
-  "data_bytes": 1048576
-}
-```
-3. Response cho thấy blob-first rẻ hơn ~99%
+**Ví dụ 4 — Submit tx:**
+1. Tìm `POST /tx/submit` trong nhóm **tx**
+2. Nhập body `{"tx_base64": "..."}` (hoặc `{"tx_hex": "..."}`)
+3. **Execute** → response `{"hash": "..."}`
 
 ### 7.4. Dùng Swagger JSON cho code generation
 
@@ -1141,28 +1169,18 @@ npx @openapitools/openapi-generator-cli generate \
 # Status
 curl -s http://127.0.0.1:50051/status | jq
 
-# Submit blob
-curl -s -X POST http://127.0.0.1:50051/blob/submit \
-  -H "Content-Type: application/json" \
-  -d '{"data_base64":"SGVsbG8gV29ybGQ="}' | jq
+# Account (peek number cho địa chỉ mới)
+curl -s http://127.0.0.1:50051/auth/account/cosmos1... | jq
 
-# Retrieve blob
-curl -s "http://127.0.0.1:50051/blob/retrieve?commitment=a591a6d..." | jq
-
-# Submit batch
-curl -s -X POST http://127.0.0.1:50051/blob/batch \
-  -H "Content-Type: application/json" \
-  -d '{"blobs_base64":["SGVsbG8=","V29ybGQ="]}' | jq
+# Số dư
+curl -s http://127.0.0.1:50051/bank/balance/cosmos1... | jq
 
 # Query smart contract
 curl -s -X POST http://127.0.0.1:50051/wasm/query-smart \
   -H "Content-Type: application/json" \
   -d '{"contract":"cosmos14hj...","msg":{"get_count":{}}}' | jq
 
-# Estimate cost cho 1MB data
-curl -s -X POST http://127.0.0.1:50051/blob/estimate-cost \
-  -H "Content-Type: application/json" \
-  -d '{"data_bytes":1048576}' | jq
+# Blob-first: KHÔNG qua HTTP server này — dùng BlobClient (JSON-RPC tới Celestia).
 
 # Submit transaction
 curl -s -X POST http://127.0.0.1:50051/tx/submit \
@@ -1323,5 +1341,5 @@ Chi tiết hơn: [Troubleshooting](troubleshooting.md) | [Error Handling](error-
 | Tune timeout, retry, auth | [Configuration](configuration.md) |
 | Deploy production | [Production Guide](production-guide.md) |
 | Xem tất cả API methods | [API Reference](api-reference.md) |
-| Batch submit data lớn | `BatchBuilder` trong [API Reference](api-reference.md) |
+| Batch submit data lớn | `BlobClient.SubmitBatch` + `BuildBatchRootTx` trong [API Reference](api-reference.md) |
 | Chạy examples có sẵn | [examples/](../examples/) — 6 runnable programs |

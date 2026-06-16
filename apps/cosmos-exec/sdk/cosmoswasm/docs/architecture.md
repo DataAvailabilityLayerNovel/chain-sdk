@@ -2,13 +2,27 @@
 
 Tài liệu này mô tả kiến trúc toàn bộ Cosmos/WASM stack — từ SDK package cho đến các thành phần bên dưới mà SDK phụ thuộc để chạy được.
 
+## Mục lục
+
+- Tổng quan hệ thống
+- 1. sdk/cosmoswasm/ — Public SDK Package
+- 2. app/ — Cosmos SDK Application
+- 3. executor/ — Execution Engine
+- 4. config/ — Server Configuration
+- 5. cmd/cosmos-exec-grpc/ — HTTP API Server
+- 6. apps/cosmos-wasm/ — Full Node Binary (evcosmos)
+- 7. scripts/ — Dev Scripts
+- Quan hệ giữa các component
+- API Tiers
+
 ## Tổng quan hệ thống
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  User App (Go)                                              │
 │  import cosmoswasm ".../sdk/cosmoswasm"                     │
-│  client.SubmitBlob / CommitRoot / QuerySmart / BuildStoreTx │
+│  client.SubmitTxBytes / QuerySmart / BuildExecuteTx         │
+│  blobClient.SubmitBlob / SubmitBatch (JSON-RPC → Celestia)  │
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTP
                        ▼
@@ -20,7 +34,7 @@ Tài liệu này mô tả kiến trúc toàn bộ Cosmos/WASM stack — từ SDK
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  CosmosExecutor            executor/                         │
-│  WASM runtime + blob store + mempool + state persistence     │
+│  WASM runtime + mempool + state persistence                  │
 └──────────────────────┬───────────────────────────────────────┘
                        │ uses
                        ▼
@@ -50,96 +64,72 @@ Tài liệu này mô tả kiến trúc toàn bộ Cosmos/WASM stack — từ SDK
 
 User chỉ cần import package này. Tất cả các component bên dưới chạy ở server side.
 
+> ⚠️ Cập nhật theo refactor `ea844067`: tầng blob/DA cũ (`commit.go`,
+> `batch.go`, `proof.go`, `cost.go`, `da_client.go`, `da_bridge.go`,
+> `mock_*.go`) **đã bị gỡ**. Blob giờ đi thẳng lên Celestia qua `BlobClient`
+> (JSON-RPC), không qua HTTP executor.
+
 ### Core — Client + Config
 
 | File | Vai trò |
 |------|---------|
 | `sdk.go` | Package doc — phân loại API tier (Tier 1/2/3) |
+| `doc.go` | Doc tổng quan package |
 | `sdk_config.go` | `SDKConfig`, `DefaultSDKConfig()`, `NewClientFromConfig()` — cấu hình timeout, retry, auth |
-| `client.go` | `Client` struct — tất cả methods chính: `SubmitBlob`, `RetrieveBlob`, `RetrieveBlobData`, `SubmitTxBytes`, `SubmitTxBase64`, `GetTxResult`, `WaitTxResult`, `QuerySmart`, `QuerySmartRaw`, `CommitRoot`, `CommitCritical`, `SubmitBatch` |
-| `executor_client.go` | `ExecutorClient` interface — transport abstraction (HTTP hoặc Mock). Client implement interface này |
-| `defaults.go` | Tất cả default constants + `DefaultBatchBuilderConfig()`, `DefaultEstimateCostRequest()` |
-| `errors.go` | `SDKError` struct (Op, Cause, Hint) + sentinel errors: `ErrNotReachable`, `ErrTxFailed`, `ErrBlobNotFound`, `ErrBlobTooLarge`, `ErrContractMissing` |
-| `types.go` | Request/response types: `SubmitTxResponse`, `GetTxResultResponse`, `TxExecutionResult`, `TxEvent`, `TxEventAttribute`, `BlobRef`, `CommitReceipt`, `CommitRootRequest`, `BlobSubmitResponse`, `BlobRetrieveResponse`, `BlobBatchResponse`, `QuerySmartResponse` |
+| `client.go` | `Client` struct — method HTTP tới cosmos-exec: `SubmitTxBytes`, `SubmitTxBase64`, `GetTxResult`, `WaitTxResult`, `Status`, `GetTxFinality`, `WaitTxFinality`, `QuerySmart`, `QuerySmartRaw`, `FetchAccount` |
+| `executor_client.go` | `ExecutorClient` interface — transport abstraction (HTTP / gRPC) |
+| `defaults.go` | Default constants: `DefaultPollInterval`, `DefaultTxTimeout` |
+| `errors.go` | `SDKError` struct (Op, Cause, Hint) + sentinel: `ErrNotReachable`, `ErrBlobTooLarge`, `ErrBlobStoreFull`, `ErrTxFailed`, `ErrContractMissing`, `ErrCommitMissing` |
+| `types.go` | Request/response types: `SubmitTxResponse`, `GetTxResultResponse`, `TxExecutionResult`, `TxEvent`, `TxEventAttribute`, `NodeStatus`, `FinalityLevel`, `QuerySmartResponse`, `InstantiateTxRequest`, `ExecuteTxRequest`, `BlobSubmitResponse`, `BlobRetrieveResponse`, `BlobCommitTxRequest`, `BlobBatchResponse`, `BatchRootTxRequest` |
 
-### Blob & Data Integrity
+### Blob-first DA (Celestia) & Data Integrity
 
 | File | Vai trò |
 |------|---------|
-| `blob.go` | `SubmitBlob()`, `RetrieveBlob()` — gọi HTTP tới executor blob store |
-| `commit.go` | `CommitRoot()` — batch blobs → tính Merkle root → ghi root on-chain qua WASM tx. `CommitCritical()` — variant trả error nếu partial failure |
-| `batch.go` | `BatchBuilder` — accumulate blobs, auto-flush khi đủ `MaxBytes` hoặc interval. `NewBatchBuilder()`, `Add()`, `Flush()`, `StartAutoFlush()`, `Len()`, `Bytes()` |
-| `chunk.go` | `ChunkBlob()` — split blob lớn thành chunks nhỏ hơn `maxChunkSize`. `ReassembleChunks()` — ghép lại. Thin wrapper → `internal/chunk` |
+| `blob.go` | `BlobClient` + `BlobClientConfig`, `NewBlobClient()`, `SubmitBlob()`, `RetrieveBlob(height, commitment)`, `SubmitBatch()`, `VerifyBlob()` — **JSON-RPC thẳng tới Celestia bridge** (không qua executor) |
+| `merkle.go` | `MerkleProof`, `ProofStep`. `BuildMerkleProof()`, `VerifyMerkleProof()`. Thin wrapper → `internal/merkle` |
+| `chunk.go` | `ChunkBlob()` / `ReassembleChunks()` + `ChunkMeta`. Thin wrapper → `internal/chunk` |
 | `compress.go` | `CompressGzip()`, `DecompressGzip()`, `CompressIfBeneficial()`, `MaybeDecompress()`, `IsGzipCompressed()`. Thin wrapper → `internal/compress` |
-| `proof.go` | `MerkleProof`, `MerklePathStep` types. `GetProof()` / `BuildMerkleProof()` — tạo inclusion proof. `VerifyMerkleProof()` — verify offline. Thin wrapper → `internal/merkle` |
-| `cost.go` | `EstimateCost()` — so sánh gas: direct on-chain vs blob-first. Dùng internal gas constants (celestia + cosmos) |
 | `namespace.go` | `Namespace` type, `NamespaceFromString()`, `NamespaceFromHex()`, `NewNamespaceV0()` — Celestia namespace 29 bytes |
 
 ### Transaction Building
 
 | File | Vai trò |
 |------|---------|
-| `tx.go` | 5 tx builders, tất cả delegate → `internal/txcodec`: |
-| | `BuildStoreTx(wasmBytes, sender)` — MsgStoreCode (upload .wasm) |
-| | `BuildInstantiateTx(req)` — MsgInstantiateContract (tạo contract instance) |
-| | `BuildExecuteTx(req)` — MsgExecuteContract (gọi contract method) |
-| | `BuildBlobCommitTx(req)` — ghi blob commitment on-chain (`record_blob` msg) |
-| | `BuildBatchRootTx(req)` — ghi Merkle root on-chain (`record_batch` msg) |
-| | `EncodeTxBase64()`, `EncodeTxHex()`, `DefaultSender()` |
-
-### DA Layer
-
-| File | Vai trò |
-|------|---------|
-| `da_client.go` | `DAClient` interface — abstraction cho Celestia hoặc Mock. Methods: `SubmitBlobs`, `GetBlobs`, `GetBlobByCommitment`, `Subscribe`, `GetHeight`. Types: `DASubmitOptions`, `DASubmitResult`, `DABlob`, `DABlobEvent`, `DANamespaceConfig` |
-| `da_bridge.go` | `DABridge` struct — kết hợp `DAClient` + `ExecutorClient`. Methods: `Submit()` — gửi blobs lên DA. `GetBlobs()` — đọc blobs từ DA. `Watch()` — subscribe realtime. `SubmitAndCommit()` — DA + on-chain trong 1 call. `PollBlobs()` — polling thay cho WebSocket. `DAHeight()` — lấy latest DA height |
+| `tx.go` | Tx builders, delegate → `internal/txcodec`: `BuildStoreTx`, `BuildInstantiateTx`, `BuildExecuteTx`, `BuildBlobCommitTx` (`record_blob`), `BuildBatchRootTx` (`record_batch`), `EncodeTxBase64`, `EncodeTxHex`, `DefaultSender` |
+| `signer.go` | `Signer`, `NewSignerFromHex`, `WithGasLimit`/`WithFee`/`Address`, và `BuildSignedStoreTx`/`BuildSignedInstantiateTx`/`BuildSignedExecuteTx`/`BuildSignedBankSend`/`BuildSignedBankSendWithFee` |
 
 ### Dev Tooling (Tier 3)
 
 | File | Vai trò |
 |------|---------|
-| `chain.go` | `DALChainConfig`, `DALChainEndpoints`, `DALChainProcess`, `StartDALChain()`, `DefaultDALChainConfig()`. Thin wrapper → `internal/devchain`. Dùng để start full chain từ Go code (dev/test) |
-| `mock_client.go` | `MockExecutorClient` — in-memory executor mock. `NewMockClient()`. Implement đầy đủ `ExecutorClient` interface. Hỗ trợ `OnSubmit()`, `OnQuery()`, `SetTxResult()`, `SetHeight()` |
-| `mock_da_client.go` | `MockDAClient` — in-memory DA mock. `NewMockDAClient()`. Implement `DAClient` interface. Hỗ trợ `InjectBlobs()` |
+| `chain.go` | `DALChainConfig`, `DALChainEndpoints`, `DALChainProcess`, `StartDALChain()`, `DefaultDALChainConfig()`. Thin wrapper → `internal/devchain`. Start full chain từ Go code (dev/test) |
 
 ### internal/ — Implementation details
 
 Go compiler cấm external code import `internal/`. Refactor tự do mà không break user code.
 
-| Package | File | Vai trò |
-|---------|------|---------|
-| `internal/merkle` | `merkle.go` | Binary SHA-256 Merkle tree: `BuildTree()`, `GenerateProof()`, `VerifyProof()` |
-| `internal/compress` | `compress.go` | Gzip BestSpeed, magic byte detection, conditional compression |
-| `internal/chunk` | `chunk.go` | Split blob theo max size, `ChunkMeta` cho reassembly |
-| `internal/txcodec` | `txcodec.go` | Protobuf tx encoding: `BuildProtoTxBytes()`, `NormalizeJSONMsg()`, `DefaultSender()`, `WithDefaultSender()` |
-| `internal/devchain` | `devchain.go` | Local chain process: `Config`, `Start()`, `buildRunnerArgs()`, `waitForLive()` |
+| Package | Vai trò |
+|---------|---------|
+| `internal/merkle` | Binary SHA-256 Merkle tree |
+| `internal/compress` | Gzip BestSpeed, magic byte detection, conditional compression |
+| `internal/chunk` | Split blob theo max size, `ChunkMeta` cho reassembly |
+| `internal/txcodec` | Protobuf tx encoding |
+| `internal/devchain` | Local chain process: `Config`, `Start()` |
 
 ### Tests
 
-| File | Covers |
-|------|--------|
-| `integration_test.go` | Full SDK workflow — 12 subtests, không cần chain chạy |
-| `client_test.go` | Client HTTP methods |
-| `mock_client_test.go` | Mock executor (blob, batch, tx, query, CommitRoot, BatchBuilder) |
-| `da_client_test.go` | Mock DA + DABridge (submit, namespace isolation, subscribe, poll) |
-| `tx_test.go` | Transaction builders |
-| `proof_test.go` | Merkle proof build + verify |
-| `cost_test.go` | Cost estimator + benchmark |
-| `compress_test.go` | Compression round-trip |
-| `chunk_test.go` | Chunking round-trip |
-| `namespace_test.go` | Namespace encode/decode |
-| `chain_test.go` | DALChainConfig defaults |
+`client_test.go`, `blob_test.go`, `tx_test.go`, `namespace_test.go`,
+`dataintegrity_test.go` (Merkle/chunk/compress), `chain_test.go`.
 
 ### examples/
 
-| Example | File | Chức năng |
-|---------|------|-----------|
-| `quickstart` | `examples/quickstart/main.go` | Blob submit/retrieve, Merkle proof, cost estimate. Không cần contract |
-| `deploy-contract` | `examples/deploy-contract/main.go` | Full lifecycle: store .wasm → instantiate → execute → query → blob + proof |
-| `contract-interaction` | `examples/contract-interaction/main.go` | Multi-contract (hackatom + reflect), sub-messages, blob-first pattern |
-| `game-telemetry` | `examples/game-telemetry/main.go` | Batch submit 20 events, chunking, compression, cost comparison |
-| `dapp-chain` | `examples/dapp-chain/main.go` | Start full DAL chain từ Go code (cần Celestia) |
-| `dapp-chain-deploy` | `examples/dapp-chain-deploy/main.go` | Start chain + auto-deploy contract (one command) |
+| Example | Chức năng |
+|---------|-----------|
+| `dapp-chain` | Start full DAL chain từ Go code (cần Celestia) |
+| `dapp-chain-deploy` | Start chain + auto-deploy contract (one command) |
+| `forced-inclusion` | Demo chống censorship: post tx thẳng lên DA |
+| `game-telemetry` | Blob-first: bulk telemetry lên Celestia, ghi commitment on-chain |
 
 ---
 
@@ -224,9 +214,8 @@ Bridge giữa HTTP API và Cosmos SDK App. Implement `core/execution.Executor` i
 
 | File | Vai trò |
 |------|---------|
-| `executor.go` | **`CosmosExecutor` struct** — orchestrator chính. Quản lý: App instance, mempool, tx results, block history, blob store, state persistence |
-| `blob_store.go` | **`BlobStore`** — in-memory content-addressed store (SHA-256). `Put()` → trả hex commitment. `Get()` → retrieve by commitment. `PutBatch()` → store N blobs + tính Merkle root. Thread-safe, có size limits (default 4MB/blob, 256MB total) |
-| `persist.go` | **`PersistStore`** — disk persistence cho blobs, tx results, blocks, chain metadata. Files: `metadata.json` (overwrite), `tx_results.jsonl`, `blocks.jsonl`, `blobs.jsonl` (append-only). Replay on startup |
+| `executor.go` | **`CosmosExecutor` struct** — orchestrator chính. Quản lý: App instance, mempool, tx results, block history, state persistence. (Không có blob store — blob đi thẳng Celestia qua SDK `BlobClient`.) |
+| `persist.go` | **`PersistStore`** — disk persistence cho tx results, blocks, chain metadata. Files: `metadata.json` (overwrite), `tx_results.jsonl`, `blocks.jsonl` (append-only). Replay on startup |
 
 ### CosmosExecutor methods
 
@@ -238,9 +227,9 @@ Bridge giữa HTTP API và Cosmos SDK App. Implement `core/execution.Executor` i
 | `GetTxs()` | Lấy tất cả tx từ mempool (drain) |
 | `GetTxResult(hash)` | Lookup kết quả execution bằng tx hash |
 | `QuerySmart(contract, queryMsg)` | Gọi `WasmKeeper.QuerySmart()` — read-only, có gas limit |
-| `StoreBlob(data)` | Lưu vào BlobStore, trả SHA-256 commitment |
-| `RetrieveBlob(commitment)` | Lấy blob từ BlobStore |
-| `StoreBatch(blobs)` | Store N blobs + Merkle root |
+| `SimulateTx(txBytes)` | Chạy thử tx đo gas, không commit |
+| `GetBalance(addr, denom)` | Số dư account |
+| `FilterTxs(txs, maxBytes, ...)` | Lọc tx theo tổng byte (Remove/Postpone/OK) |
 | `SetFinal(height)` | Mark block as finalized |
 | `GetStatus()` | Trả `StatusInfo` (initialized, height, healthy) |
 | `GetLatestBlock()` / `GetBlock(height)` | Block info — includes `tx_hashes` for txs included in that block. See [auto-account-creation.md](auto-account-creation.md#2-tx_hashes-on-blockinfo) |
@@ -252,7 +241,7 @@ Bridge giữa HTTP API và Cosmos SDK App. Implement `core/execution.Executor` i
 | Option | Vai trò |
 |--------|---------|
 | `WithQueryGasMax(gas)` | Gas limit cho WASM smart queries (default 50M) |
-| `WithBlobStoreLimits(maxBlob, maxTotal)` | Custom blob store size limits |
+| `WithGenesis(genesisJSON)` | Override genesis lúc InitChain (vd cấp tiền treasury) |
 | `WithPersistence(dir, &err)` | Enable disk persistence + replay on startup |
 
 ---
@@ -408,26 +397,22 @@ Binary riêng chạy rollup full node. Kết nối tới executor qua gRPC.
 
 ```
 sdk/cosmoswasm/
-├── sdk_config.go ──→ client.go ──→ blob.go      (HTTP POST /blob/submit)
+├── sdk_config.go ──→ client.go ──[HTTP]──→ cmd/cosmos-exec-grpc/
+│                         │                       │
+│                         ├──→ tx.go (→ internal/txcodec), signer.go
 │                         │
-│                         ├──→ commit.go          (POST /commit/root)
-│                         │        ├──→ proof.go   (→ internal/merkle)
-│                         │        └──→ tx.go      (→ internal/txcodec)
-│                         │
-│                         ├──→ batch.go           (BatchBuilder → commit.go)
-│                         │
-│                         └──→ da_bridge.go       (DAClient + ExecutorClient)
+│                         └──→ blob.go ──[JSON-RPC]──→ Celestia bridge
+│                                  ├──→ merkle.go  (→ internal/merkle)
+│                                  ├──→ chunk.go   (→ internal/chunk)
+│                                  └──→ compress.go(→ internal/compress)
 │
 ├── chain.go ──→ internal/devchain ──→ scripts/run-cosmos-wasm-nodes.go
 │
-└── [HTTP calls] ──→ cmd/cosmos-exec-grpc/
-                         │
-                         ├──→ executor/executor.go
-                         │        ├──→ app/app.go (Cosmos SDK + WASM runtime)
-                         │        ├──→ executor/blob_store.go
-                         │        └──→ executor/persist.go
-                         │
-                         └──→ config/config.go
+└── cmd/cosmos-exec-grpc/
+        ├──→ executor/executor.go
+        │        ├──→ app/app.go (Cosmos SDK + WASM runtime)
+        │        └──→ executor/persist.go
+        └──→ config/config.go
 ```
 
 ---
@@ -436,11 +421,11 @@ sdk/cosmoswasm/
 
 | Tier | Stability | Bao gồm |
 |------|-----------|----------|
-| **Tier 1 — Core** | Stable | `NewClient`, `SubmitBlob`, `CommitRoot`, `QuerySmart`, `BatchBuilder`, `SDKError` |
-| **Tier 2 — Power-user** | Stable | Tx builders, Namespace, DAClient, DABridge, Merkle proof, Chunk, Compress, Cost |
-| **Tier 3 — Dev tooling** | May change | `MockExecutorClient`, `MockDAClient`, `StartDALChain` |
+| **Tier 1 — Core** | Stable | `NewClient`/`NewClientFromConfig`, `SubmitTxBytes`/`WaitTxResult`, `QuerySmart`, `NewBlobClient`/`SubmitBlob`/`SubmitBatch`, `BuildBatchRootTx`, `SDKError` |
+| **Tier 2 — Power-user** | Stable | Tx builders, `Signer` + signed builders, Namespace, Merkle proof, Chunk, Compress |
+| **Tier 3 — Dev tooling** | May change | `StartDALChain`, `DALChainConfig`, `DALChainProcess` |
 | **internal/** | Private | merkle, compress, chunk, txcodec, devchain |
-| **executor/** | Server-side | `CosmosExecutor`, `BlobStore`, `PersistStore` — không phải SDK public API |
+| **executor/** | Server-side | `CosmosExecutor`, `PersistStore` — không phải SDK public API |
 | **app/** | Server-side | Cosmos SDK App + modules — không phải SDK public API |
 | **config/** | Server-side | Server config — không phải SDK public API |
 

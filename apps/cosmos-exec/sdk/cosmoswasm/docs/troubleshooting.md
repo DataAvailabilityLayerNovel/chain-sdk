@@ -1,166 +1,130 @@
 # Troubleshooting
 
-## Quick Diagnostics
+## Chẩn đoán nhanh
 
-Before debugging, run these curl commands to check the executor:
+Trước khi debug, chạy các lệnh curl sau để kiểm tra executor:
 
 ```bash
-# 1. Is the executor running?
+# 1. Executor có chạy không?
 curl -s http://127.0.0.1:50051/health
-# Expected: {"status":"ok"}
+# Kỳ vọng: 200 OK
 
-# 2. Is it initialized?
+# 2. Đã initialized chưa?
 curl -s http://127.0.0.1:50051/status
-# Expected: {"initialized":true, "chain_id":"...", "latest_height":N, ...}
+# Kỳ vọng: {"initialized":true, "chain_id":"...", "latest_height":N, ...}
 
-# 3. Can it accept blobs?
-curl -s -X POST http://127.0.0.1:50051/blob/submit \
-  -H 'Content-Type: application/json' \
-  -d '{"data_base64":"dGVzdA=="}'
-# Expected: {"commitment":"9f86d08...","size":4}
-
-# 4. Are blocks being produced?
+# 3. Block có được sinh không?
 curl -s http://127.0.0.1:50051/blocks/latest
-# Expected: {"height":N, "time":"...", "app_hash":"...", "num_txs":N}
+# Kỳ vọng: {"height":N, "time":"...", "app_hash":"...", "num_txs":N}
 
-# 5. Is the mempool draining?
+# 4. Mempool có drain không?
 curl -s http://127.0.0.1:50051/tx/pending
-# Expected: {"pending_count":0}  (or small number)
+# Kỳ vọng: {"pending_count":0}  (hoặc số nhỏ)
 ```
+
+> Lưu ý: **không có** endpoint `/blob/submit` trên `cosmos-exec-grpc`. Blob-first
+> đi qua `BlobClient` (JSON-RPC thẳng tới Celestia bridge). Kiểm tra DA riêng ở
+> mục [DA URL errors](#9-da-url-errors).
 
 ---
 
-## Common Issues
+## Lỗi thường gặp
 
 ### 1. `connection refused` / `ErrNotReachable`
 
-**Symptom:** SDK returns `executor not reachable: connection refused`.
+**Triệu chứng:** SDK trả `executor not reachable: connection refused`.
 
-**Causes & fixes:**
-
-| Cause | Fix |
-|-------|-----|
-| Executor not started | `cd apps/cosmos-exec && go run ./cmd/cosmos-exec-grpc --in-memory` |
-| Wrong port | Check `--address` flag or `COSMOS_EXEC_LISTEN_ADDR`. Default: `50051` |
-| Process crashed | Check logs for panic. Restart executor |
-| Firewall/Docker network | Ensure the port is accessible. In Docker, use `--network host` or expose port |
+| Nguyên nhân | Cách sửa |
+|-------------|----------|
+| Executor chưa start | `cd apps/cosmos-exec && go run ./cmd/cosmos-exec-grpc --in-memory` |
+| Sai port | Check `--address` hoặc `COSMOS_EXEC_LISTEN_ADDR`. Default `50051` |
+| Process crash | Xem log panic. Restart executor |
+| Firewall/Docker network | Đảm bảo port truy cập được (`--network host` hoặc expose port) |
 
 ```bash
-# Verify process is running
-lsof -i :50051
-# or
+lsof -i :50051            # tiến trình có đang chạy?
 curl -s http://127.0.0.1:50051/health
 ```
 
-### 2. `SubmitTxBytes` succeeds but `GetTxResult` returns `found=false`
+### 2. `SubmitTxBytes` thành công nhưng `GetTxResult` trả `found=false`
 
-**Symptom:** Transaction hash is returned, but polling finds nothing.
-
-**Causes & fixes:**
-
-| Cause | Fix |
-|-------|-----|
-| Blocks not being produced | Check `curl /blocks/latest`. If height isn't advancing, the sequencer may be stalled |
-| Tx still in mempool | Wait one block time (default 2s). Use `WaitTxResult` instead of manual polling |
-| Wrong hash | Ensure you're using the hash from `SubmitTxResponse`, not computing your own |
-| Executor restarted | In-memory mode loses all state on restart. Use persistence |
+| Nguyên nhân | Cách sửa |
+|-------------|----------|
+| Block không được sinh | Check `curl /blocks/latest`. Height không tăng → sequencer kẹt |
+| Tx còn trong mempool | Chờ 1 block time (2s). Dùng `WaitTxResult` thay vì poll thủ công |
+| Sai hash | Dùng hash từ `SubmitTxResponse`, không tự tính |
+| Executor restart | In-memory mất state khi restart. Bật persistence |
 
 ```go
-// Correct pattern: submit + wait with timeout
 ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 defer cancel()
 resp, _ := client.SubmitTxBytes(ctx, txBytes)
 result, err := client.WaitTxResult(ctx, resp.Hash, time.Second)
 if err != nil {
-    // context.DeadlineExceeded = blocks not advancing
-    log.Fatal(err)
+    log.Fatal(err) // DeadlineExceeded = block không tiến
 }
 ```
 
-### 3. Transaction executed but `Code != 0`
-
-**Symptom:** `WaitTxResult` returns a result but with non-zero code.
-
-**Debug steps:**
+### 3. Tx thực thi nhưng `Code != 0`
 
 ```go
 result, _ := client.WaitTxResult(ctx, hash, time.Second)
 if result.Code != 0 {
     fmt.Println("Code:", result.Code)
-    fmt.Println("Log:", result.Log)  // <-- WASM error message is here
+    fmt.Println("Log:", result.Log)  // <-- message lỗi WASM ở đây
 }
 ```
 
-Common error logs:
-
-| Log contains | Cause | Fix |
-|-------------|-------|-----|
-| `"failed to execute message"` | WASM contract rejected the message | Check contract's execute handler |
-| `"contract not found"` | Wrong contract address | Verify bech32 address |
-| `"unknown message"` | Contract doesn't handle this message type | Check contract's supported messages |
-| `"unauthorized"` | Sender doesn't have permission | Check contract's ownership/ACL |
-| `"insufficient funds"` | Not enough balance | Fund the sender account |
+| Log chứa | Nguyên nhân | Cách sửa |
+|----------|-------------|----------|
+| `"failed to execute message"` | Contract từ chối message | Check execute handler của contract |
+| `"contract not found"` | Sai địa chỉ contract | Verify bech32 |
+| `"unknown message"` | Contract không handle message type này | Check message contract hỗ trợ |
+| `"unauthorized"` | Sender không có quyền | Check ownership/ACL của contract |
+| `"insufficient funds"` | Không đủ số dư | Cấp tiền cho account sender |
 
 ### 4. `blob size ... exceeds max`
 
-**Symptom:** `ErrBlobTooLarge` when submitting a blob.
+**Triệu chứng:** `ErrBlobTooLarge` khi `BlobClient.SubmitBlob`.
 
-**Fix:** Default max is 4 MB. Options:
+`MaxBlobSize` = 2 MB (safety cap của BlobClient). Options:
 
 ```go
-// Option 1: Compress first
+// Option 1: nén trước
 compressed, ok := cosmoswasm.CompressIfBeneficial(data)
-if ok {
-    client.SubmitBlob(ctx, compressed)
-}
+if ok { bc.SubmitBlob(ctx, compressed) }
 
-// Option 2: Split into chunks
-chunks, meta := cosmoswasm.ChunkBlob(data, cosmoswasm.DefaultMaxChunkSize)
-for _, chunk := range chunks {
-    client.SubmitBlob(ctx, chunk)
-}
+// Option 2: chia chunk
+chunks, meta := cosmoswasm.ChunkBlob(data, 512*1024)
+_ = meta
+for _, chunk := range chunks { bc.SubmitBlob(ctx, chunk) }
 
-// Option 3: Increase server limit
-// COSMOS_EXEC_MAX_BLOB_SIZE=8388608  (8 MB)
+// Option 3: nhiều blob 1 batch
+batch, _ := bc.SubmitBatch(ctx, [][]byte{b1, b2, b3})
 ```
 
 ### 5. `store full` / `ErrBlobStoreFull`
 
-**Symptom:** `blob store capacity exceeded`.
-
-**Fix:** The in-memory blob store has a total size limit (default 256 MB dev, 1 GB prod).
+**Triệu chứng:** `blob store capacity exceeded` (khi dùng blob store server-side).
 
 ```bash
-# Check current usage
-curl -s http://127.0.0.1:50051/metrics.json | jq '.blob_bytes, .blob_count'
-
-# Increase limit
 export COSMOS_EXEC_MAX_STORE_SIZE=2147483648  # 2 GB
 ```
 
-Or restart the executor (in-memory store is cleared on restart).
+Hoặc restart executor (in-memory store xoá khi restart).
 
 ### 6. `context deadline exceeded` (timeout)
 
-**Symptom:** Requests are timing out.
+| Nguyên nhân | Cách sửa |
+|-------------|----------|
+| SDK timeout quá thấp | Tăng `SDKConfig.Timeout` (default 20s) |
+| Executor quá tải | Check `curl /metrics.json` — `mempool_size` cao = nghẽn sinh block |
+| Upload blob lớn mạng chậm | Tăng timeout; cân nhắc chunk |
+| WASM query quá phức tạp | Tăng `query_gas_max` |
 
-**Causes & fixes:**
-
-| Cause | Fix |
-|-------|-----|
-| SDK timeout too low | Increase `SDKConfig.Timeout` (default 20s) |
-| Executor overloaded | Check `curl /metrics.json` — high `mempool_size` = block production bottleneck |
-| Large blob upload on slow network | Increase timeout; consider chunking |
-| WASM query too complex | Increase `query_gas_max` on executor |
-
-### 7. Auth errors (HTTP 401)
-
-**Symptom:** `api error (401): unauthorized`.
-
-**Fix:**
+### 7. Auth error (HTTP 401)
 
 ```go
-// Client must include the same token as the server
 client, _ := cosmoswasm.NewClientFromConfig(cosmoswasm.SDKConfig{
     ExecURL:   "http://127.0.0.1:50051",
     AuthToken: "same-token-as-COSMOS_EXEC_AUTH_TOKEN",
@@ -168,110 +132,93 @@ client, _ := cosmoswasm.NewClientFromConfig(cosmoswasm.SDKConfig{
 ```
 
 ```bash
-# curl equivalent
 curl -H "Authorization: Bearer same-token" http://127.0.0.1:50051/status
 ```
 
 ### 8. Rate limited (HTTP 429)
 
-**Symptom:** `api error (429): rate limit exceeded`.
-
-**Fix:** Reduce request rate or increase server limit:
-
 ```bash
 export COSMOS_EXEC_RATE_LIMIT_RPS=200
 ```
 
-Client side: add delay between requests or use `BatchBuilder` to reduce call frequency.
+Client side: thêm delay giữa request, hoặc gom blob bằng `SubmitBatch` để giảm
+số lần gọi.
 
 ### 9. DA URL errors
 
-**Symptom:** `DABridge.Submit` fails with connection errors.
-
-**Checklist:**
+**Triệu chứng:** `NewBlobClient` / `SubmitBlob` lỗi kết nối.
 
 ```bash
-# 1. Is DA node reachable?
+# 1. DA node có tới được không?
 curl -s http://localhost:26658/header/1
 
-# 2. Is auth token valid?
+# 2. Auth token hợp lệ?
 curl -s -H "Authorization: Bearer $DA_AUTH_TOKEN" http://localhost:26658/header/1
 
-# 3. Common URL mistakes:
-#    Wrong: https://localhost:26658  (DA node is usually HTTP, not HTTPS)
-#    Wrong: http://localhost:26657   (26657 is CometBFT RPC, not DA)
-#    Right: http://localhost:26658   (DA bridge RPC)
+# 3. Lỗi URL thường gặp:
+#    Sai:  https://localhost:26658  (DA node thường HTTP, không HTTPS)
+#    Sai:  http://localhost:26657   (26657 là CometBFT RPC, không phải DA)
+#    Đúng: http://localhost:26658   (DA bridge RPC)
 ```
 
-### 10. Executor state lost after restart
+### 10. Mất state sau restart
 
-**Symptom:** After restarting, `initialized=false`, no blocks, no blobs.
-
-**Cause:** Running with `--in-memory` or persistence not enabled.
-
-**Fix:**
+**Triệu chứng:** restart xong `initialized=false`, không block, không blob.
+**Nguyên nhân:** chạy `--in-memory` hoặc chưa bật persistence.
 
 ```bash
-# Enable persistence
 go run ./cmd/cosmos-exec-grpc --profile prod --home /data/cosmos-exec
-
-# Verify persistence is on
-# Look for log line: "persistence enabled" dir="/data/cosmos-exec/data"
+# Tìm log: "persistence enabled" dir="/data/cosmos-exec/data"
 ```
 
 ### 11. `fee payer address: <garbled bytes> does not exist: unknown address` (code 9)
 
-**Symptom:** First signed tx from a fresh Keplr / browser account fails. The address renders as non-ASCII bytes (`��Yp�…`).
+**Triệu chứng:** Tx ký đầu tiên từ account Keplr/browser mới fail. Địa chỉ hiện
+ra dạng byte non-ASCII (`��Yp�…`).
 
-**Cause:** The ante chain runs `DeductFeeDecorator` **before** `AutoCreateAccountDecorator`, so DeductFee looks up the fee payer (= first signer when no explicit fee payer is set) in state before AutoCreate has had a chance to create the account. `FeeTx.FeePayer()` returns `[]byte` (raw address) in cosmos-sdk v0.50, hence the garbled `%s` formatting.
+**Nguyên nhân:** Ante chain chạy `DeductFeeDecorator` **trước**
+`AutoCreateAccountDecorator`, nên DeductFee tra fee payer trong state trước khi
+AutoCreate kịp tạo account. `FeeTx.FeePayer()` trả `[]byte` (raw address) trong
+cosmos-sdk v0.50 → format `%s` ra byte rác.
 
-**Fix:** In `apps/cosmos-exec/app/ante.go`, ensure `NewAutoCreateAccountDecorator` precedes `NewDeductFeeDecorator` in `NewPermissionlessAnteHandler`. See [auto-account-creation.md](auto-account-creation.md).
+**Cách sửa:** Trong `apps/cosmos-exec/app/ante.go`, đảm bảo
+`NewAutoCreateAccountDecorator` đứng trước `NewDeductFeeDecorator`. Xem
+[auto-account-creation.md](auto-account-creation.md).
 
-### 12. `signature verification failed; please verify account number (N) and chain-id (...)` (code 4)
+### 12. `signature verification failed; please verify account number ...` (code 4)
 
-**Symptom:** First signed tx from a fresh account is rejected with `unauthorized` even though the signature itself is correctly produced.
+**Nguyên nhân:** Client ký `SignDoc` với `account_number = 0` (zero-value của
+account chưa tồn tại), nhưng `AutoCreateAccountDecorator` gán số khác từ
+`GlobalAccountNumber`. `SigVerificationDecorator` dựng lại `SignDoc` với số của
+chain → không khớp → fail.
 
-**Cause:** The client signed `SignDoc` with `account_number = 0` (zero-value returned for non-existent accounts), but `AutoCreateAccountDecorator` assigned a different, globally-unique number from `GlobalAccountNumber`. `SigVerificationDecorator` rebuilds `SignDoc` with the chain's number, the two don't match, and verification fails.
+**Cách sửa:** `executor.GetAccountInfo` peek `AccountKeeper.AccountNumber.Peek(ctx)`
+cho account chưa tồn tại và trả số đó — đúng số `NewAccountWithAddress` sẽ gán.
+Client ký với số đó → verify thành công. Xem
+[auto-account-creation.md](auto-account-creation.md).
 
-**Fix:** `executor.GetAccountInfo` peeks `AccountKeeper.AccountNumber.Peek(ctx)` for not-yet-existing accounts and returns that number — same value `NewAccountWithAddress` will subsequently assign. The client signs with that number and verification succeeds. See [auto-account-creation.md](auto-account-creation.md#b-authaccount-peeks-the-future-number).
-
-> **Do not** pin auto-created accounts to `account_number = 0` to work around this — the SDK enforces a uniqueness index on `account_number → address`, and module accounts already occupy the low numbers. You will get `collections: conflict: index uniqueness constrain violation: 0` and a panic.
+> **Đừng** ghim account auto-created về `account_number = 0` để né lỗi — SDK
+> enforce uniqueness index `account_number → address`, và module account đã
+> chiếm các số thấp → sẽ panic `index uniqueness constrain violation: 0`.
 
 ### 13. Port already in use
 
-**Symptom:** `bind: address already in use`.
-
 ```bash
-# Find what's using the port
 lsof -i :50051
-
-# Kill the old process
 kill $(lsof -t -i :50051)
-
-# Or use a different port
+# hoặc dùng port khác:
 go run ./cmd/cosmos-exec-grpc --address 0.0.0.0:50052
 ```
 
 ---
 
-## Debug Checklist
+## Debug checklist
 
-When something doesn't work, check in this order:
-
-1. **Executor running?** → `curl /health`
-2. **Executor initialized?** → `curl /status` (check `initialized`)
-3. **Blocks advancing?** → `curl /blocks/latest` (check `height` increases)
+1. **Executor chạy?** → `curl /health`
+2. **Initialized?** → `curl /status` (check `initialized`)
+3. **Block tiến?** → `curl /blocks/latest` (check `height` tăng)
 4. **Auth OK?** → `curl -H "Authorization: Bearer $TOKEN" /status`
-5. **Blob store OK?** → `curl -X POST /blob/submit -d '{"data_base64":"dGVzdA=="}'`
-6. **Mempool draining?** → `curl /tx/pending` (should be 0 or small)
-7. **Executor logs** → Look for `ERROR` or `panic` in stdout
-8. **SDK error details** → Check `SDKError.Hint` for actionable advice
-
-## Getting Help
-
-If you've checked all the above and still stuck:
-
-1. Capture the full `SDKError` output (Op, Cause, Hint)
-2. Run the diagnostic curl commands above and save output
-3. Check executor logs for errors around the same timestamp
-4. Open an issue at the repo with the above information
+5. **Mempool drain?** → `curl /tx/pending` (nên 0 hoặc nhỏ)
+6. **DA OK?** (nếu dùng blob-first) → `curl http://localhost:26658/header/1`
+7. **Log executor** → tìm `ERROR` / `panic` trong stdout
+8. **Chi tiết lỗi SDK** → đọc `SDKError.Hint`

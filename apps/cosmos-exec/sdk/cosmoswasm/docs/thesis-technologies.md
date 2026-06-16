@@ -1370,7 +1370,8 @@ result, _ := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
 - `metadata.json` — overwrite-on-update: chain ID, state root hex, last/finalized heights
 - `tx_results.jsonl` — append-only: kết quả execute từng tx (gas used, events, log)
 - `blocks.jsonl` — append-only: thông tin block (height, time, app hash, tx count)
-- `blobs.jsonl` — append-only: raw blob bytes (hex) submitted qua `/blob/submit`
+
+(Không lưu blob: blob đi thẳng Celestia qua `BlobClient`, không qua executor.)
 
 **JSONL (JSON Lines)** = một JSON object trên mỗi dòng. Dễ append O(1), dễ parse bằng `bufio.Scanner`, dễ inspect bằng `jq`:
 
@@ -1393,7 +1394,7 @@ result, _ := e.app.WasmKeeper.QuerySmart(queryCtx, contractAddr, queryMsg)
 
 **IAVL chỉ giữ trạng thái HIỆN TẠI** — không lưu lịch sử event/log của từng tx. Cosmos SDK 0.50 không tự persist tx response indices. PersistStore là layer "audit log" giúp:
 - Tra cứu tx result by hash sau khi chain restart (RPC `/tx/{hash}`)
-- Replay blob data (RPC `/blob/retrieve`)
+- Replay block info sau restart (RPC `/blocks/{height}`)
 - Migrate sang DB khác (vd PostgreSQL indexer) bằng cách stream JSONL
 
 ### Hệ thống sử dụng như thế nào
@@ -1544,8 +1545,8 @@ Trong dev (mặc định) — mọi file trong **home dir** của node:
     │                              auth, bank, wasm, ibc, ... state
     ├── metadata.json            ← PersistStore: chainID, stateRoot, heights (Section 19)
     ├── tx_results.jsonl         ← append-only tx results
-    ├── blocks.jsonl             ← append-only block info
-    └── blobs.jsonl              ← append-only blob data
+    └── blocks.jsonl             ← append-only block info
+       (không có blobs.jsonl — blob lưu trên Celestia qua BlobClient)
 ```
 
 **Phân chia trách nhiệm:**

@@ -13,6 +13,17 @@ Tài liệu này đi sâu **đúng 4 câu hỏi**:
 > dẫn code. Đây là phần `cosmos-exec` **kế thừa nguyên** từ ev-node — chain của
 > tôi không sửa, nhưng cần hiểu để vận hành và debug.
 
+## Mục lục
+
+- 0. Bức tranh tổng: hai kênh truyền, hai tốc độ
+- 1. Giao tiếp P2P
+- 2. Xác định DA height
+- 3. Submit blob: cách thức & format
+- 4. Retrieve blob: cách thức & khi nào cần
+- 5. Dữ liệu thực tế trông như thế nào — ví dụ + explorer FE
+- 6. Tóm tắt: ai gọi gì, khi nào
+- 7. Tham chiếu code
+
 ---
 
 ## 0. Bức tranh tổng: hai kênh truyền, hai tốc độ
@@ -56,8 +67,8 @@ Code: [`pkg/p2p/client.go`](../../../../../pkg/p2p/client.go).
 ### 1.2 Định danh & khám phá peer
 
 - **`chainID`** đóng vai namespace mạng: chỉ peer **cùng chainID** mới kết nối
-  được. Trong dự án, chainID set qua HTTP `POST /chain/init` (không lấy từ
-  genesis như upstream).
+  được. Trong dự án, `ev-node` gọi `CosmosExecutor.InitChain(chainID)` nội bộ để
+  set chain identity (không có endpoint HTTP `/chain/init`).
 - **Seeds / Peers**: CSV multiaddr trong `P2PConfig` để bootstrap. Node follower
   dial vào sequencer; sequencer không cần peer (xem `getPeerIDs()` trong
   [`pkg/sync/sync_service.go:500`](../../../../../pkg/sync/sync_service.go#L500) —

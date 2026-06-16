@@ -1,19 +1,19 @@
 # Error Handling
 
-## Error Structure
+## Cấu trúc lỗi
 
-All SDK methods return `*SDKError` (or `nil`). It wraps the root cause with context:
+Public method của SDK trả `*SDKError` (hoặc `nil`). Nó bọc lỗi gốc kèm ngữ cảnh:
 
 ```go
 type SDKError struct {
-    Op    string // Operation that failed: "SubmitBlob", "CommitRoot", etc.
-    Cause error  // Underlying error (matchable with errors.Is)
-    Hint  string // One-line actionable suggestion
+    Op    string // operation lỗi: "SubmitBlob", "SubmitBatch", ...
+    Cause error  // lỗi gốc (match được bằng errors.Is)
+    Hint  string // gợi ý 1 dòng để sửa
 }
 ```
 
 ```go
-_, err := client.SubmitBlob(ctx, data)
+_, err := bc.SubmitBlob(ctx, data)
 if err != nil {
     var sdkErr *cosmoswasm.SDKError
     if errors.As(err, &sdkErr) {
@@ -24,137 +24,135 @@ if err != nil {
 }
 ```
 
-## Sentinel Errors
+## Sentinel errors
 
-Match with `errors.Is()` for programmatic handling:
+Match bằng `errors.Is()`:
 
-| Sentinel | Meaning | Retryable | Typical Action |
-|----------|---------|-----------|----------------|
-| `ErrNotReachable` | Executor is down / connection refused | Yes | Retry with backoff; alert if persistent |
-| `ErrBlobTooLarge` | Blob exceeds `max_blob_size` (4 MB default) | No | Compress with `CompressIfBeneficial` or split with `ChunkBlob` |
-| `ErrBlobStoreFull` | Total blob store capacity exceeded | No* | Reduce submission rate; restart executor to reclaim; increase `max_store_total_size` |
-| `ErrTxFailed` | Transaction executed but failed (Code != 0) | No | Check `TxExecutionResult.Log` for the WASM error |
-| `ErrContractMissing` | Contract address not provided | No | Set the `Contract` field |
-| `ErrCommitMissing` | Commitment string empty | No | Pass the hex commitment from `SubmitBlob`/`CommitRoot` |
+| Sentinel | Ý nghĩa | Retryable | Hành động |
+|----------|---------|-----------|-----------|
+| `ErrNotReachable` | Executor down / connection refused | Có | Retry với backoff; alert nếu kéo dài |
+| `ErrBlobTooLarge` | Blob vượt `MaxBlobSize` (2 MB — cap của BlobClient) | Không | Nén bằng `CompressIfBeneficial` hoặc chia bằng `ChunkBlob` |
+| `ErrBlobStoreFull` | Vượt dung lượng tổng | Không* | Giảm tần suất; restart executor; tăng `max_store_total_size` |
+| `ErrTxFailed` | Tx đã thực thi nhưng fail (`Code != 0`) | Không | Xem `TxExecutionResult.Log` |
+| `ErrContractMissing` | Thiếu địa chỉ contract | Không | Set field `Contract` |
+| `ErrCommitMissing` | Thiếu commitment | Không | Truyền commitment hex từ `SubmitBlob` |
 
-\* `ErrBlobStoreFull` is retryable after the operator takes action (restart/increase limits).
+\* `ErrBlobStoreFull` chỉ retry được sau khi operator can thiệp (restart/tăng limit).
 
 ```go
 if errors.Is(err, cosmoswasm.ErrNotReachable) {
-    // Retry with backoff
+    // retry với backoff
 } else if errors.Is(err, cosmoswasm.ErrBlobTooLarge) {
-    // Split the data
-    chunks, meta := cosmoswasm.ChunkBlob(data, cosmoswasm.DefaultMaxChunkSize)
+    // chia nhỏ data
+    chunks, meta := cosmoswasm.ChunkBlob(data, 512*1024)
+    _ = meta
     for _, chunk := range chunks {
-        client.SubmitBlob(ctx, chunk)
+        bc.SubmitBlob(ctx, chunk)
     }
 } else if errors.Is(err, cosmoswasm.ErrBlobStoreFull) {
-    // Alert operator, back off
+    // alert operator, back off
 }
 ```
 
-## Error Categories
+## Phân loại lỗi
 
-### 1. Validation Errors (never retry)
+### 1. Validation error (không retry)
 
-Caused by incorrect input. Fix the caller code.
+Do input sai. Sửa code caller.
 
-| Error message | Cause | Fix |
-|---------------|-------|-----|
-| `"tx bytes cannot be empty"` | Empty tx | Check tx building step |
-| `"blob data cannot be empty"` | Empty blob | Check data source |
-| `"contract is required"` | Missing contract address | Set `Contract` field |
-| `"code id is required"` | `CodeID=0` in instantiate | Set `CodeID` from store tx result |
-| `"msg must be valid json"` | Malformed JSON message | Validate JSON before passing |
-| `"commitment required"` | Empty commitment string | Use commitment from `SubmitBlob`/`CommitRoot` |
+| Message | Nguyên nhân | Cách sửa |
+|---------|-------------|----------|
+| `"tx bytes cannot be empty"` | Tx rỗng | Kiểm tra bước build tx |
+| `"blob data is empty"` | Blob rỗng | Kiểm tra nguồn data |
+| `"contract address required"` | Thiếu địa chỉ contract | Set `Contract` |
+| `"code id is required"` | `CodeID=0` khi instantiate | Lấy `CodeID` từ kết quả store tx |
+| `"msg must be valid json"` | JSON message hỏng | Validate JSON trước khi truyền |
+| `"commitment required"` | Commitment rỗng | Dùng commitment từ `SubmitBlob` |
 
-### 2. Network Errors (retryable)
+### 2. Network error (retryable)
 
-Transient failures — executor is temporarily unavailable.
+Lỗi tạm thời — executor tạm thời không phục vụ.
 
-| Error contains | Meaning | Retry? | Hint |
-|----------------|---------|--------|------|
-| `"connection refused"` | Executor not running | Yes | Start executor; retry with exponential backoff |
-| `"deadline exceeded"` | Request timed out | Yes | Increase `SDKConfig.Timeout`; check executor load |
-| `"context canceled"` | Caller cancelled | No | Intentional cancellation |
+| Lỗi chứa | Ý nghĩa | Retry? | Gợi ý |
+|----------|---------|--------|-------|
+| `"connection refused"` | Executor chưa chạy | Có | Start executor; retry exponential backoff |
+| `"deadline exceeded"` | Request timeout | Có | Tăng `SDKConfig.Timeout`; check tải executor |
+| `"context canceled"` | Caller huỷ | Không | Huỷ chủ động |
 
-SDK auto-retries these when `SDKConfig.RetryAttempts > 0`:
+SDK tự retry các lỗi này khi `SDKConfig.RetryAttempts > 0`:
 
 ```go
 client, _ := cosmoswasm.NewClientFromConfig(cosmoswasm.SDKConfig{
     ExecURL:       "http://127.0.0.1:50051",
-    RetryAttempts: 3,    // retry up to 3 times
-    RetryDelay:    2*time.Second,
+    RetryAttempts: 3,    // retry tối đa 3 lần
+    RetryDelay:    2 * time.Second,
 })
 ```
 
-### 3. Capacity Errors (conditional retry)
+### 3. Capacity error (retry có điều kiện)
 
-The executor is running but cannot accept the request.
+Executor đang chạy nhưng không nhận request.
 
-| Error | Retry after... |
-|-------|----------------|
-| `ErrBlobTooLarge` | Compress or chunk the data (never retry same payload) |
-| `ErrBlobStoreFull` | Operator increases limits or restarts (back off, alert) |
-| HTTP 429 (rate limited) | `RetryDelay` (respect rate limit) |
+| Lỗi | Retry sau khi... |
+|-----|------------------|
+| `ErrBlobTooLarge` | Nén hoặc chunk data (đừng retry cùng payload) |
+| `ErrBlobStoreFull` | Operator tăng limit / restart (back off, alert) |
+| HTTP 429 (rate limited) | Chờ `RetryDelay` (tôn trọng rate limit) |
 
-### 4. Execution Errors (never retry same tx)
+### 4. Execution error (không retry cùng tx)
 
-The transaction was executed but the WASM logic rejected it.
+Tx đã thực thi nhưng logic WASM từ chối.
 
 ```go
 result, err := client.WaitTxResult(ctx, hash, time.Second)
 if err != nil {
-    // Network/timeout error — may retry
-    log.Fatal(err)
+    log.Fatal(err) // network/timeout — có thể retry
 }
 if result.Code != 0 {
-    // Execution error — tx was included but failed
-    // Do NOT resubmit the same tx
-    fmt.Println("WASM error:", result.Log)
-    fmt.Println("Code:", result.Code)
+    // tx đã vào block nhưng fail — KHÔNG resubmit cùng tx
+    fmt.Println("WASM error:", result.Log, "code:", result.Code)
 }
 ```
 
-Common WASM error codes:
+Code lỗi thường gặp:
 
-| Code | Meaning |
+| Code | Ý nghĩa |
 |------|---------|
 | `0` | Success |
-| `2` | Tx parse error (malformed proto) |
+| `2` | Tx parse error (proto hỏng) |
 | `5` | Insufficient funds |
 | `11` | Out of gas |
-| `18` | Contract execution failed (check `Log` for details) |
+| `18` | Contract execution failed (xem `Log`) |
 
-### 5. API Errors (HTTP 4xx/5xx)
+### 5. API error (HTTP 4xx/5xx)
 
-Returned as `SDKError` with the HTTP status and response body:
+Trả về dạng `SDKError` kèm HTTP status + body:
 
 ```
-SubmitBlob: api error (413): blob size 5242880 exceeds max 4194304
-  hint: compress the data first (enabled by default in BatchBuilder) or split with ChunkBlob()
+SubmitBlob: api error (413): blob size 5242880 exceeds max 2097152
+  hint: compress the data first or split with ChunkBlob()
 ```
 
-## Retry Strategy
+## Chiến lược retry
 
-### Recommended Backoff
+### Backoff khuyến nghị
 
 ```go
-func submitWithRetry(ctx context.Context, client *cosmoswasm.Client, data []byte) (*cosmoswasm.BlobSubmitResponse, error) {
+func submitWithRetry(ctx context.Context, bc *cosmoswasm.BlobClient, data []byte) (*cosmoswasm.BlobSubmitResponse, error) {
     var lastErr error
     for attempt := 0; attempt < 5; attempt++ {
-        res, err := client.SubmitBlob(ctx, data)
+        res, err := bc.SubmitBlob(ctx, data)
         if err == nil {
             return res, nil
         }
         lastErr = err
 
-        // Only retry transient errors
+        // chỉ retry lỗi tạm thời
         if !errors.Is(err, cosmoswasm.ErrNotReachable) {
-            return nil, err // validation/capacity error — don't retry
+            return nil, err // validation/capacity — đừng retry
         }
 
-        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        // exponential backoff: 1s, 2s, 4s, 8s, 16s
         backoff := time.Duration(1<<attempt) * time.Second
         select {
         case <-ctx.Done():
@@ -166,35 +164,26 @@ func submitWithRetry(ctx context.Context, client *cosmoswasm.Client, data []byte
 }
 ```
 
-Or use the built-in retry:
+Hoặc dùng retry built-in (`SDKConfig.RetryAttempts` + `RetryDelay`, delay cố định).
 
-```go
-client, _ := cosmoswasm.NewClientFromConfig(cosmoswasm.SDKConfig{
-    ExecURL:       "http://127.0.0.1:50051",
-    RetryAttempts: 3,
-    RetryDelay:    2 * time.Second, // fixed delay (not exponential)
-})
-```
+### Retry gì / không retry gì
 
-### What to Retry vs Not
+| Tình huống | Retry? | Vì sao |
+|------------|--------|--------|
+| Connection refused | Có | Executor có thể đang restart |
+| Deadline exceeded | Có | Network tạm thời |
+| Blob too large | Không | Cùng payload luôn fail |
+| Store full | Chờ + retry | Cần operator can thiệp |
+| WASM execution failed | Không | Cùng tx sẽ fail lại |
+| Invalid JSON | Không | Sửa message |
+| Context cancelled | Không | Caller chủ động dừng |
 
-| Scenario | Retry? | Why |
-|----------|--------|-----|
-| Connection refused | Yes | Executor may be restarting |
-| Deadline exceeded | Yes | Transient network issue |
-| Blob too large | No | Same payload will always fail |
-| Store full | Wait + retry | Need operator action first |
-| WASM execution failed | No | Same tx will fail again |
-| Invalid JSON | No | Fix the message |
-| Context cancelled | No | Caller decided to stop |
+## Map lỗi → hành động app
 
-## Error → App Action Mapping
-
-| Your app is... | Error | Action |
-|----------------|-------|--------|
-| Game server submitting events | `ErrNotReachable` | Buffer events locally, retry in 5s |
-| Game server submitting events | `ErrBlobStoreFull` | Switch to local file, alert ops |
-| Indexer polling tx results | `Found=false` | Wait one block time (2s), poll again |
-| Indexer polling tx results | `ErrNotReachable` | Backoff 10s, re-establish connection |
-| Contract deployer | `Code != 0` | Log error, do not retry same tx |
-| DA bridge watcher | `PollBlobs` handler error | Return error to stop polling; log and investigate |
+| App của bạn là... | Lỗi | Hành động |
+|-------------------|-----|-----------|
+| Game server submit event | `ErrNotReachable` | Buffer local, retry sau 5s |
+| Game server submit event | `ErrBlobStoreFull` | Ghi file local, alert ops |
+| Indexer poll tx result | `Found=false` | Chờ 1 block time (2s), poll lại |
+| Indexer poll tx result | `ErrNotReachable` | Backoff 10s, kết nối lại |
+| Contract deployer | `Code != 0` | Log lỗi, không retry cùng tx |

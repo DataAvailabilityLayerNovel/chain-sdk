@@ -2,6 +2,19 @@
 
 Tài liệu này giải thích chi tiết bảng cấu hình theo từng profile (`dev`, `test`, `prod`) của server `cosmos-exec-grpc`, cùng với mã nguồn liên quan và cách từng tuỳ chọn hoạt động dưới mui.
 
+## Mục lục
+
+- 1. Bảng tổng quan
+- 2. Auth (Bearer Token)
+- 3. Persistence (lưu state ra đĩa)
+- 4. Rate limit
+- 5. CORS
+- 6. Faucet (treasury + cấp token test)
+- 7. Mapping nhanh: tuỳ chọn → code
+- 8. Recipe khởi động theo profile
+- 9. Chạy cả chain (sequencer + full node) theo profile
+- 10. Kiểm tra nhanh khi triển khai
+
 ## 1. Bảng tổng quan
 
 | Profile | Auth | Persistence | Rate limit | CORS               | Faucet              |

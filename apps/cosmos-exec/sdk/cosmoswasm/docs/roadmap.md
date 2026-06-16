@@ -2,6 +2,25 @@
 
 Roadmap từ zero đến hiểu toàn bộ hệ thống cosmos chain trên ev-node framework. Mỗi phase có mục tiêu rõ ràng, file cần đọc, và kiến thức đạt được.
 
+> ⚠️ **Lưu ý refactor `ea844067`:** các mục nhắc `commit.go`/`CommitRoot`,
+> `batch.go`/`BatchBuilder`, `da_bridge.go`/`DABridge`, `da_client.go`/`DAClient`,
+> `EstimateCost`, hay `/blob/submit` là **API/file cũ đã bị gỡ**. API blob-first
+> hiện tại: `blob.go` → `BlobClient` (`SubmitBlob`/`SubmitBatch`/`RetrieveBlob`),
+> `merkle.go` (`BuildMerkleProof`). Xem [migration.md](migration.md).
+
+## Mục lục
+
+- Tổng quan roadmap
+- Phase 1: Foundation — Core Interfaces & Concepts
+- Phase 2: Execution Layer — CosmosExecutor
+- Phase 3: Framework Engine — ev-node Internals
+- Phase 4: Integration — 2-Process Wiring
+- Phase 5: SDK & Extensions
+- Phase 6: Operations — Production Readiness
+- Dependency Map
+- Quick Reference — Tất cả docs hiện có
+- Checklist — Tự đánh giá
+
 ---
 
 ## Tổng quan roadmap
@@ -174,7 +193,7 @@ stateRoot = commitRes.Data  // IAVL Merkle root
 - [`apps/cosmos-exec/executor/persist.go`](../../../executor/persist.go)
 
 **Kiến thức cần nắm:**
-- 4 files: `metadata.json` (overwrite), `tx_results.jsonl`, `blocks.jsonl`, `blobs.jsonl` (append)
+- 3 files: `metadata.json` (overwrite), `tx_results.jsonl`, `blocks.jsonl` (append). Không có `blobs.jsonl` — blob lưu trên Celestia qua `BlobClient`
 - On startup: replay `.jsonl` files vào memory maps
 - `metadata.json` chứa: ChainID, lastHeight, stateRoot, finalizedHeight
 - Pattern: ABCI state (IAVL/LevelDB) + metadata (JSONL) = complete state

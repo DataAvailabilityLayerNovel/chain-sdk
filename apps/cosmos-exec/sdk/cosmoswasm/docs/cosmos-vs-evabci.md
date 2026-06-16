@@ -2,6 +2,12 @@
 
 So sánh giữa cosmos chain tự xây (`apps/cosmos-exec/` + `apps/cosmos-wasm/`) với [ev-abci](https://github.com/evstack/ev-abci) — adapter chính thức của Evolve cho ABCI applications.
 
+> ⚠️ **Lưu ý refactor `ea844067`:** `DAClient`/`DABridge`, `BatchBuilder`,
+> `EstimateCost`, `CommitRoot`, mock client và endpoint `/blob/submit` **đã bị
+> gỡ**. Blob-first giờ qua `BlobClient` (JSON-RPC tới Celestia) +
+> `SubmitBatch`/`BuildBatchRootTx`. Một số bảng dưới còn liệt kê các API cũ; xem
+> [migration.md](migration.md) cho danh sách thay thế.
+
 ---
 
 ## Mục lục
@@ -403,11 +409,10 @@ cmd/cosmos-exec-grpc/
 |--------|------|-------|
 | POST | `/tx/submit` | Submit tx bytes |
 | GET | `/tx/{hash}` | Get tx result |
-| POST | `/blob/submit` | Store blob → commitment |
-| GET | `/blob/{commitment}` | Retrieve blob |
-| POST | `/blob/batch` | Store batch → root |
-| POST | `/query/smart` | WASM smart query |
-| POST | `/commit/root` | Commit Merkle root on-chain |
+| GET | `/tx/result?hash=...` | Get tx result (query param) |
+| POST | `/wasm/query-smart` | WASM smart query |
+| GET | `/auth/account/{address}` | Account number/sequence |
+| GET | `/bank/balance/{address}` | Số dư |
 | GET | `/status` | Chain status |
 | GET | `/exec/height` | EL current height |
 | POST | `/exec/rollback` | Manual rollback |
@@ -489,8 +494,8 @@ ev-abci lưu:
 ~/.cosmos-exec-grpc/data/
   ├── metadata.json     ← ChainMetadata (overwrite mỗi block)
   ├── tx_results.jsonl  ← append-only tx execution results
-  ├── blocks.jsonl      ← append-only block info
-  └── blobs.jsonl       ← append-only blob data
+  └── blocks.jsonl      ← append-only block info
+  # (không có blobs.jsonl — blob lưu trên Celestia qua BlobClient)
 
 + IAVL tree (LevelDB)   ← Cosmos SDK managed state
 ```

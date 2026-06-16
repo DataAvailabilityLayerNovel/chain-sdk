@@ -2,6 +2,12 @@
 
 So sánh giữa những gì cosmos chain (`apps/cosmos-exec/` + `apps/cosmos-wasm/`) đã xây dựng so với ev-node framework cung cấp sẵn, bao gồm các phần mở rộng, phần thiếu, và các thiết kế khác biệt.
 
+> ⚠️ **Lưu ý refactor `ea844067`:** tầng blob/DA SDK đã đổi. `DAClient`/`DABridge`
+> (file `da_client.go`/`da_bridge.go`) và endpoint `/blob/submit` **không còn
+> tồn tại** — blob-first giờ đi qua `BlobClient` (JSON-RPC thẳng tới Celestia).
+> Một số mục dưới còn mô tả `DABridge`/`/blob/submit` theo thiết kế cũ; xem
+> [migration.md](migration.md) và [api-reference.md](api-reference.md) cho API thật.
+
 ## Mục lục
 
 1. [Tổng quan so sánh](#1-tổng-quan-so-sánh)
@@ -159,18 +165,20 @@ type BlobStore struct {
 }
 ```
 
-**Mục đích:** Cho phép app lưu data lớn (game events, telemetry, assets) **off-chain** nhưng có commitment on-chain. Pattern: `StoreBlob(data) → commitment → ghi commitment lên WASM contract (32 bytes thay vì full data)`.
+**Mục đích:** Cho phép app lưu data lớn (game events, telemetry, assets) **off-chain** nhưng có commitment on-chain. Pattern: `BlobClient.SubmitBlob(data) → commitment + height → ghi lên WASM contract (commitment thay vì full data)`.
 
 **ev-node không có feature này.** EVM executor cũng không. Đây là pattern riêng của cosmos chain cho use case game/telemetry.
 
-**API endpoints:**
+**API (qua `BlobClient` — JSON-RPC tới Celestia, KHÔNG phải HTTP endpoint của cosmos-exec):**
 
-| Endpoint | Chức năng |
-|----------|-----------|
-| `POST /blob/submit` | Store single blob → return commitment |
-| `GET /blob/retrieve?commitment=...` | Fetch blob by commitment |
-| `POST /blob/batch` | Store batch → return Merkle root + commitments |
-| `GET /blob/estimate-cost` | Estimate DA cost cho blob size |
+| Method | Chức năng |
+|--------|-----------|
+| `BlobClient.SubmitBlob(data)` | Submit 1 blob → `Commitment` + `Height` |
+| `BlobClient.RetrieveBlob(height, commitment)` | Fetch blob (cần cả height) |
+| `BlobClient.SubmitBatch(blobs)` | Submit batch → Merkle root + commitments |
+| `BuildBatchRootTx(...)` + `SubmitTxBytes` | Ghi root on-chain |
+
+> Pattern thực: `SubmitBlob/SubmitBatch → BuildBlobCommitTx/BuildBatchRootTx → SubmitTxBytes` (ghi commitment/root on-chain, không phải full data).
 
 ### 4.2. PersistStore — Append-Only Disk Persistence
 
@@ -180,9 +188,9 @@ type BlobStore struct {
 ~/.cosmos-exec-grpc/data/
   ├── metadata.json     ← ChainMetadata (overwrite mỗi block)
   ├── tx_results.jsonl  ← append-only tx execution results
-  ├── blocks.jsonl      ← append-only block info
-  └── blobs.jsonl       ← append-only blob data
+  └── blocks.jsonl      ← append-only block info
 ```
+(Không có `blobs.jsonl` — blob lưu trên Celestia qua `BlobClient`.)
 
 **Mục đích:** Persist execution metadata survive across restarts. Khi cosmos-exec-grpc start lại, nó replay tất cả `.jsonl` files vào memory.
 
