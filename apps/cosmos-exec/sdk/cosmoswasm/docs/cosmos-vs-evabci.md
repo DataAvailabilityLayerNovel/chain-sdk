@@ -593,9 +593,9 @@ Cosmos chain có **SDK package hoàn chỉnh** (`sdk/cosmoswasm/`):
 | Mock | MockExecutorClient, MockDAClient |
 | Cost | EstimateCost (on-chain vs blob-first) |
 | Chain | StartDALChain (programmatic chain runner) |
-| 6 examples | quickstart → game-telemetry → dapp-chain |
+| 3 examples | my-counter → game-telemetry → forced-inclusion |
 
-**33 Go files**, 5 internal packages, 12 test files, 6 examples.
+**33 Go files**, 5 internal packages, 12 test files, 3 examples.
 
 ### So sánh
 
@@ -604,7 +604,7 @@ Cosmos chain có **SDK package hoàn chỉnh** (`sdk/cosmoswasm/`):
 | **Client SDK** | Không (dùng CosmJS/CLI) | Full Go SDK (33 files) |
 | **Tx builders** | Không (CosmJS handles) | 5 builders (Store, Instantiate, Execute, BlobCommit, BatchRoot) |
 | **Mock testing** | Không | MockExecutorClient + MockDAClient |
-| **Examples** | Không | 6 runnable examples |
+| **Examples** | Không | 3 runnable examples (my-counter, forced-inclusion, game-telemetry) |
 | **API tiers** | N/A | Tier 1 (Core) / Tier 2 (Power-user) / Tier 3 (Dev) |
 | **Documentation** | README | 12 doc files |
 
@@ -749,7 +749,7 @@ Cosmos chain **không** có event bus. Tx events lưu trong `txResults` map, que
 | **Crash recovery** | Partial | Hoàn chỉnh | Cosmos chain |
 | **BlobStore** | Không | Full (SHA-256, Merkle) | Cosmos chain |
 | **Merkle proofs** | Không | Full (build + verify offline) | Cosmos chain |
-| **SDK client** | Không | 33 files, 6 examples | Cosmos chain |
+| **SDK client** | Không | 33 files, 3 examples | Cosmos chain |
 | **Tx builders** | Không | 5 builders | Cosmos chain |
 | **DABridge (app-level)** | Không | Full (Submit + Watch) | Cosmos chain |
 | **Chunking + Compression** | Không | Có | Cosmos chain |

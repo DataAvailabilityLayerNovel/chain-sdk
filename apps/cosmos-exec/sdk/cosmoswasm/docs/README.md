@@ -98,6 +98,7 @@ Người vận hành chain: start sequencer + full node, cấu hình DA, monitor
 
 | File | Nội dung |
 |------|----------|
+| [cac-san-pham-lien-quan.md](cac-san-pham-lien-quan.md) | Các giải pháp dùng để **đối chiếu** với đồ án, mô tả kỹ **cách hoạt động** (ev-abci, ev-node/Rollkit trần, Dymension RDK, app-chain CosmWasm, OP Stack/Arbitrum/Polygon CDK, Astria, EigenDA/Avail/EIP-4844) |
 | [cosmos-vs-evnode.md](cosmos-vs-evnode.md) | So sánh chain dự án vs framework ev-node |
 | [cosmos-vs-evabci.md](cosmos-vs-evabci.md) | So sánh chain dự án vs adapter `ev-abci` |
 | [ibc-integration.md](ibc-integration.md) | Trạng thái & cách tích hợp IBC |

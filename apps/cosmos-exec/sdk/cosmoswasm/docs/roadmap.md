@@ -518,14 +518,11 @@ evcosmos start
 
 | Example | Path | Học được gì |
 |---------|------|-------------|
-| `quickstart` | [`examples/quickstart/main.go`](../examples/quickstart/main.go) | Blob submit/retrieve, Merkle proof, cost estimate |
-| `deploy-contract` | [`examples/deploy-contract/main.go`](../examples/deploy-contract/main.go) | Full WASM lifecycle: store → instantiate → execute → query |
-| `contract-interaction` | [`examples/contract-interaction/main.go`](../examples/contract-interaction/main.go) | Multi-contract, sub-messages, blob-first pattern |
-| `game-telemetry` | [`examples/game-telemetry/main.go`](../examples/game-telemetry/main.go) | Batch, chunking, compression, cost comparison |
-| `dapp-chain` | [`examples/dapp-chain/main.go`](../examples/dapp-chain/main.go) | Start full chain từ Go code |
-| `dapp-chain-deploy` | [`examples/dapp-chain-deploy/main.go`](../examples/dapp-chain-deploy/main.go) | Start chain + auto-deploy contract |
+| `my-counter` | [`examples/my-counter/main.go`](../examples/my-counter/main.go) | Full WASM lifecycle: store → instantiate → execute → query |
+| `game-telemetry` | [`examples/game-telemetry/main.go`](../examples/game-telemetry/main.go) | Blob-first: batch, chunking, compression, ghi commitment on-chain |
+| `forced-inclusion` | [`examples/forced-inclusion/main.go`](../examples/forced-inclusion/main.go) | Chống censorship: post tx thẳng lên DA |
 
-**Recommend:** Bắt đầu với `quickstart` → `deploy-contract` → `game-telemetry`.
+**Recommend:** Bắt đầu với `my-counter` → `game-telemetry` → `forced-inclusion`.
 
 ---
 

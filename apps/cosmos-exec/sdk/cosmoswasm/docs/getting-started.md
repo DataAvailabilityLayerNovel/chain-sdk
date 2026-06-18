@@ -1042,16 +1042,16 @@ Nếu chưa setup Celestia, dùng quick-deploy với example có sẵn:
 ```bash
 cd /path/to/ev-node
 
-# Chạy dapp-chain-deploy example (tự download sample contract)
+# Chạy example my-counter (deploy + tương tác counter contract)
 export DA_BRIDGE_RPC=http://localhost:26658
 export DA_AUTH_TOKEN=<token>
 export DA_NAMESPACE=test
 
-go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy
+go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/my-counter
 ```
 
-Hoặc chạy một example có sẵn (`dapp-chain`, `dapp-chain-deploy`,
-`forced-inclusion`, `game-telemetry`):
+Hoặc chạy một example có sẵn (`my-counter`, `forced-inclusion`,
+`game-telemetry`):
 
 ```bash
 # Start chain trước (terminal 1)
@@ -1342,4 +1342,4 @@ Chi tiết hơn: [Troubleshooting](troubleshooting.md) | [Error Handling](error-
 | Deploy production | [Production Guide](production-guide.md) |
 | Xem tất cả API methods | [API Reference](api-reference.md) |
 | Batch submit data lớn | `BlobClient.SubmitBatch` + `BuildBatchRootTx` trong [API Reference](api-reference.md) |
-| Chạy examples có sẵn | [examples/](../examples/) — 6 runnable programs |
+| Chạy examples có sẵn | [examples/](../examples/) — 3 runnable programs |

@@ -1,6 +1,6 @@
 # Documentation & Resources Index
 
-Complete navigation guide để tìm SDK, CLI, CosmWasm, examples, docs, và các tools khác trong ev-node repo.
+Navigation guide để tìm SDK, CLI, CosmWasm, examples, docs, và các tools khác trong repo đồ án (sovereign CosmWasm rollup trên Celestia DA, xây trên ev-node).
 
 ---
 
@@ -8,12 +8,12 @@ Complete navigation guide để tìm SDK, CLI, CosmWasm, examples, docs, và cá
 
 | Tài liệu | Đường dẫn | Mô tả |
 |----------|----------|-------|
-| **README chính** | [README.md](README.md) | Tổng quan ev-node, quickstart, chain architecture |
-| **Cosmos + WASM Runbook** | [cosmos.md](cosmos.md) | Chi tiết chạy Cosmos chain, WASM contract operations |
+| **README chính** | [README.md](README.md) | Tổng quan đồ án, quickstart, chain architecture |
+| **SDK docs (chính)** | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) | Index toàn bộ tài liệu kỹ thuật + function map |
+| **Getting started** | [apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md) | End-to-end: compile `.wasm` → start chain → deploy → interact |
+| **Node operations** | [apps/cosmos-exec/sdk/cosmoswasm/docs/node-operations.md](apps/cosmos-exec/sdk/cosmoswasm/docs/node-operations.md) | Chạy sequencer + full node, ports, data on/off-chain |
 | **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) | Hướng dẫn đóng góp code, PR guidelines |
 | **Changelog** | [CHANGELOG.md](CHANGELOG.md) | Release notes, version history |
-| **Docs folder** | [docs/](docs/) | API docs, concepts, architecture diagrams |
-| **Docs README** | [docs/README.md](docs/README.md) | Navigation cho docs folder |
 
 ---
 
@@ -25,16 +25,15 @@ Complete navigation guide để tìm SDK, CLI, CosmWasm, examples, docs, và cá
 |----------|----------|-------|
 | **SDK README** | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) | Full SDK guide, API reference, examples, import guide |
 | **SDK Examples** | [apps/cosmos-exec/sdk/cosmoswasm/examples/](apps/cosmos-exec/sdk/cosmoswasm/examples/) | Runnable examples |
-| ├─ Start chain | [examples/dapp-chain/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain/main.go) | Minimal example: start DAL chain |
-| ├─ Chain + Deploy | [examples/dapp-chain-deploy/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy/main.go) | Start chain + deploy contract |
-| ├─ Submit Tx | [examples/submit-tx/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/submit-tx/main.go) | Build & submit transaction |
-| ├─ Query Contract | [examples/query-contract/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/query-contract/main.go) | Smart query WASM contract |
-| **SDK Package** | `github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm` | Go import path |
+| ├─ Counter contract | [examples/my-counter/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/my-counter/main.go) | End-to-end: deploy + execute + query CosmWasm |
+| ├─ Game telemetry | [examples/game-telemetry/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/game-telemetry/main.go) | Batch event lên DA (blob-first) |
+| ├─ Forced inclusion | [examples/forced-inclusion/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/forced-inclusion/main.go) | Chống kiểm duyệt qua forced inclusion |
+| **SDK Package** | `github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm` | Go import path |
 | **Go Module** | [apps/cosmos-exec/go.mod](apps/cosmos-exec/go.mod) | Dependencies |
 
 **Cách import:**
 ```go
-import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
+import cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"
 ```
 
 ---
@@ -44,7 +43,7 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 | Component | Path | Binary | Mô tả |
 |-----------|------|--------|-------|
 | **Cosmos WASM Node** | [apps/cosmos-wasm/](apps/cosmos-wasm/) | `evcosmos` | Sequencer + fullnode binary |
-| **Execution Backend** | [apps/cosmos-exec/](apps/cosmos-exec/) | `cosmos-exec-grpc` | Execute tx, update state |
+| **Execution Backend** | [apps/cosmos-exec/](apps/cosmos-exec/) | `cosmos-exec-grpc` | `CosmosExecutor` + `x/wasm`: execute tx, update state |
 | **Orchestration** | [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go) | — | Runner: start sequencer+fullnode+exec |
 | **Node full** | [node/full.go](node/full.go) | — | Full node implementation |
 | **Sequencer** | [node/node.go](node/node.go) | — | Sequencer logic |
@@ -59,10 +58,9 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 
 | Example | Path | Dùng cho |
 |---------|------|----------|
-| **Start DAL chain** | [apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain/main.go) | Minimal DAL chain startup |
-| **Chain + Deploy** | [apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/dapp-chain-deploy/main.go) | Full flow: start + deploy |
-| **Submit TX** | [apps/cosmos-exec/sdk/cosmoswasm/examples/submit-tx/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/submit-tx/main.go) | Build & submit transaction |
-| **Query Contract** | [apps/cosmos-exec/sdk/cosmoswasm/examples/query-contract/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/query-contract/main.go) | Smart query WASM contract |
+| **Counter contract** | [examples/my-counter/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/my-counter/main.go) | Deploy + execute + query CosmWasm end-to-end |
+| **Game telemetry** | [examples/game-telemetry/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/game-telemetry/main.go) | Batch event lên DA (blob-first) |
+| **Forced inclusion** | [examples/forced-inclusion/main.go](apps/cosmos-exec/sdk/cosmoswasm/examples/forced-inclusion/main.go) | Forced inclusion / chống kiểm duyệt |
 
 ### Helper Scripts
 
@@ -70,10 +68,12 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 |--------|------|----------|
 | **Run stack** | [scripts/run-cosmos-wasm-nodes.go](scripts/run-cosmos-wasm-nodes.go) | Orchestrate sequencer+fullnode+exec |
 | **RPC queries** | [scripts/contracts/wasm-rpc.sh](scripts/contracts/wasm-rpc.sh) | Status, latest block, tx query |
-| **DA query** | [scripts/query_celestia_blob.sh](scripts/query_celestia_blob.sh) | Query DA blob by height |
-| **DA watch** | [scripts/watch_celestia_latest_blobs.sh](scripts/watch_celestia_latest_blobs.sh) | Real-time DA blob monitoring |
-| **Base64 tool** | [scripts/base64-tool.sh](scripts/base64-tool.sh) | Encode/decode base64 |
+| **Deploy contract** | [scripts/deploy-sample-contract.sh](scripts/deploy-sample-contract.sh) | Deploy contract mẫu |
+| **Submit tx** | [scripts/submit-tx.sh](scripts/submit-tx.sh) | Submit transaction |
+| **Verify DA submit** | [scripts/verify-da-submit.sh](scripts/verify-da-submit.sh) | Kiểm tra blob đã lên DA |
 | **Namespace tool** | [scripts/encode-namespace.sh](scripts/encode-namespace.sh) | Encode DA namespace |
+| **Base64 tool** | [scripts/base64-tool.sh](scripts/base64-tool.sh) | Encode/decode base64 |
+| **CI all modules** | [scripts/ci-all-modules.sh](scripts/ci-all-modules.sh) | Lint/test mọi go.mod |
 
 ---
 
@@ -81,13 +81,14 @@ import "github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm"
 
 | Tool | Path | Mô tả |
 |------|------|-------|
-| **cosmos-da-submit** | [tools/cosmos-da-submit/](tools/cosmos-da-submit/) | Submit tx to Cosmos chain + DA |
 | **cosmos-explorer** | [tools/cosmos-explorer/](tools/cosmos-explorer/) | Chain explorer |
+| **cosmos-wasm-tx** | [tools/cosmos-wasm-tx/](tools/cosmos-wasm-tx/) | Build/submit tx CosmWasm |
 | **da-debug** | [tools/da-debug/](tools/da-debug/) | Debug DA layer issues |
+| **blob-decoder** | [tools/blob-decoder/](tools/blob-decoder/) | Decode DA blob data |
+| **cache-analyzer** | [tools/cache-analyzer/](tools/cache-analyzer/) | Phân tích cache |
 | **db-bench** | [tools/db-bench/](tools/db-bench/) | Database benchmark |
 | **evnode-rpc** | [tools/evnode-rpc/](tools/evnode-rpc/) | gRPC client tool |
 | **local-da** | [tools/local-da/](tools/local-da/) | Local DA mock |
-| **blob-decoder** | [tools/blob-decoder/](tools/blob-decoder/) | Decode DA blob data |
 
 ---
 
@@ -121,8 +122,8 @@ go test ./node -run TestFullNode
 
 | Service | Endpoint | Port | Dùng cho |
 |---------|----------|------|----------|
-| **Exec API (gRPC)** | `http://127.0.0.1:50051` | 50051 | TX submit, contract operations |
-| **Cosmos REST** | `http://127.0.0.1:38331` | 38331 | Bank balance query, chain info |
+| **Exec API (gRPC/HTTP)** | `http://127.0.0.1:50051` | 50051 | TX submit, contract operations |
+| **Cosmos REST** | `http://127.0.0.1:38331` | 38331 | Bank balance query, chain info, health |
 | **Cosmos RPC** | `http://127.0.0.1:38657` | 38657 | State, block, tx queries |
 | **Sequencer REST** | `http://127.0.0.1:48331` | 48331 | Sequencer-specific queries |
 | **Sequencer RPC** | `http://127.0.0.1:48657` | 48657 | Sequencer P2P |
@@ -133,11 +134,11 @@ go test ./node -run TestFullNode
 
 | Resource | Link | Mô tả |
 |----------|------|-------|
-| **Chain SDK Repo** | [github.com/DataAvailabilityLayerNovel/chain-sdk](https://github.com/DataAvailabilityLayerNovel/chain-sdk) | Upstream chain SDK (production version) |
-| **Evolve Website** | [ev.xyz](https://ev.xyz) | Project website |
+| **Chain SDK Repo** | [github.com/DataAvailabilityLayerNovel/chain-sdk](https://github.com/DataAvailabilityLayerNovel/chain-sdk) | Repo đồ án |
+| **ev-node (upstream)** | [github.com/evstack/ev-node](https://github.com/evstack/ev-node) · [ev.xyz](https://ev.xyz) | Khung sovereign rollup nền tảng |
 | **Cosmos Docs** | [docs.cosmos.network](https://docs.cosmos.network) | Cosmos SDK documentation |
 | **CosmWasm Docs** | [docs.cosmwasm.com](https://docs.cosmwasm.com) | WASM contract documentation |
-| **Celestia Bridge** | Celestia bridge endpoint | DA layer bridge |
+| **Celestia Docs** | [docs.celestia.org](https://docs.celestia.org) | DA layer documentation |
 
 ---
 
@@ -147,14 +148,15 @@ go test ./node -run TestFullNode
 
 | Goal | Go to | What to run |
 |------|-------|------------|
-| Start DAL chain quickly | [cosmos.md](cosmos.md) section 3 | `go run ./scripts/run-cosmos-wasm-nodes.go` |
-| Use SDK to write Go app | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) | `go get github.com/evstack/ev-node/apps/cosmos-exec/sdk/cosmoswasm` |
+| Start chain quickly | [README.md](README.md) section 3 | `go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go --clean-on-start=true` |
+| Use SDK to write Go app | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) | `import cosmoswasm "github.com/DataAvailabilityLayerNovel/chain-sdk/apps/cosmos-exec/sdk/cosmoswasm"` |
 | Deploy a contract | [getting-started.md](apps/cosmos-exec/sdk/cosmoswasm/docs/getting-started.md) | `BuildStoreTx` + `BuildInstantiateTx` → `SubmitTxBytes` |
-| Query contract state | [apps/cosmos-exec/sdk/cosmoswasm/README.md](apps/cosmos-exec/sdk/cosmoswasm/README.md) section 4 | `client.QuerySmart(ctx, contract, msg)` |
+| Query contract state | [api-reference.md](apps/cosmos-exec/sdk/cosmoswasm/docs/api-reference.md) | `client.QuerySmart(ctx, contract, msg)` |
 | Submit transaction | [api-reference.md](apps/cosmos-exec/sdk/cosmoswasm/docs/api-reference.md) | `client.SubmitTxBytes(ctx, tx)` |
-| Check DA blob | [scripts/query_celestia_blob.sh](scripts/query_celestia_blob.sh) | `./scripts/query_celestia_blob.sh` |
+| Check DA blob | [scripts/verify-da-submit.sh](scripts/verify-da-submit.sh) | `./scripts/verify-da-submit.sh` |
 | Run full E2E tests | [test/e2e/](test/e2e/) | `go test ./test/e2e/...` |
-| Understand architecture | [docs/overview/](docs/overview/) | Read concept docs |
+| Understand architecture | [architecture.md](apps/cosmos-exec/sdk/cosmoswasm/docs/architecture.md) | Read concept docs |
+| So sánh với giải pháp khác | [cac-san-pham-lien-quan.md](apps/cosmos-exec/sdk/cosmoswasm/docs/cac-san-pham-lien-quan.md) | Đối chiếu ev-abci, Dymension, OP Stack… |
 | Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) | Follow guidelines |
 
 ---
@@ -162,10 +164,9 @@ go test ./node -run TestFullNode
 ## 📂 File Structure (High Level)
 
 ```
-ev-node/
+chain-sdk/
 ├── README.md                          # Main readme
 ├── DOCUMENTATION_INDEX.md             # This file (navigation)
-├── cosmos.md                          # Cosmos chain runbook
 ├── CONTRIBUTING.md                    # Contribution guide
 ├── CHANGELOG.md                       # Release notes
 │
@@ -174,12 +175,13 @@ ev-node/
 │   ├── cosmos-exec/                   # Execution backend
 │   │   ├── sdk/cosmoswasm/            # ★ Go SDK
 │   │   │   ├── README.md
+│   │   │   ├── docs/                  # Tài liệu kỹ thuật + luận văn
 │   │   │   └── examples/              # Runnable examples
-│   │   └── cmd/cosmos-exec-grpc/      # HTTP API server (main binary)
+│   │   └── cmd/cosmos-exec-grpc/      # HTTP/gRPC API server (main binary)
 │
 ├── tools/                             # Utility tools
 │   ├── da-debug/
-│   ├── evnode-rpc/
+│   ├── cosmos-explorer/
 │   └── ...
 │
 ├── scripts/                           # Helper scripts
@@ -190,12 +192,6 @@ ev-node/
 ├── test/                              # Tests
 │   ├── e2e/
 │   ├── docker-e2e/
-│   └── ...
-│
-├── docs/                              # Documentation
-│   ├── README.md
-│   ├── concepts/
-│   ├── guides/
 │   └── ...
 │
 ├── block/                             # Block operations
@@ -212,4 +208,4 @@ ev-node/
 
 ---
 
-Version: 31 tháng 3, 2026 | Updated: Auto-generated index
+Updated: navigation index cho repo đồ án `DataAvailabilityLayerNovel/chain-sdk`.

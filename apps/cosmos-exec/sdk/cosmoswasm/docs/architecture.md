@@ -126,8 +126,7 @@ Go compiler cấm external code import `internal/`. Refactor tự do mà không 
 
 | Example | Chức năng |
 |---------|-----------|
-| `dapp-chain` | Start full DAL chain từ Go code (cần Celestia) |
-| `dapp-chain-deploy` | Start chain + auto-deploy contract (one command) |
+| `my-counter` | Vòng đời WASM đầy đủ: store → instantiate → execute → query (counter contract) |
 | `forced-inclusion` | Demo chống censorship: post tx thẳng lên DA |
 | `game-telemetry` | Blob-first: bulk telemetry lên Celestia, ghi commitment on-chain |
 

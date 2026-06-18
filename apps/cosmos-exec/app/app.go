@@ -343,6 +343,8 @@ func New(logger log.Logger, database dbm.DB, chainID ...string) *App {
 			app.AccountKeeper,
 			app.BankKeeper,
 			txConfig.SignModeHandler(),
+			runtime.NewKVStoreService(keys[wasmtypes.StoreKey]), // wasm tx-counter store
+			wasmConfig.SimulationGasLimit,                       // giới hạn gas simulate
 		))
 	}
 

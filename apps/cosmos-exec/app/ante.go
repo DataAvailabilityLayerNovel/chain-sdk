@@ -7,10 +7,16 @@ import (
 	"os"      // đọc biến môi trường (os.Getenv) — dùng để bật/tắt rule qua ENV.
 	"strings" // xử lý chuỗi: cắt khoảng trắng, đổi chữ thường, so sánh.
 
+	// corestoretypes: interface KVStoreService — wasm tx-counter decorator cần.
+	corestoretypes "cosmossdk.io/core/store"
 	// errorsmod: gói lỗi của Cosmos, cho phép "bọc" (wrap) lỗi kèm thông điệp.
 	errorsmod "cosmossdk.io/errors"
 	// math: kiểu số học của Cosmos (LegacyDec = số thập phân, Int = số nguyên lớn).
 	"cosmossdk.io/math"
+	// storetypes: kiểu Gas (uint64) cho giới hạn gas simulate.
+	storetypes "cosmossdk.io/store/types"
+	// wasmkeeper: decorator ante riêng của x/wasm (CountTX, LimitSimulationGas).
+	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	// txsigning: chứa HandlerMap — bản đồ các kiểu ký (sign mode) được hỗ trợ.
 	txsigning "cosmossdk.io/x/tx/signing"
 	// sdk: alias cho types gốc của Cosmos SDK (Context, Tx, Coins, AccAddress...).
@@ -254,14 +260,24 @@ func (d AutoCreateAccountDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simul
 // VI: hàm lắp ráp toàn bộ "chuỗi ante" — danh sách bước kiểm tra chạy
 // tuần tự cho MỖI tx trước khi thực thi. Tham số: account keeper, bank
 // keeper, bản đồ sign mode. Trả về: 1 sdk.AnteHandler đã ghép sẵn.
+//
+// txCounterStoreService + simGasLimit là 2 tham số wasm-specific (lấy từ x/wasm
+// store key và WasmConfig.SimulationGasLimit) cho 2 decorator mượn từ wasmd:
+//   - LimitSimulationGasDecorator: chặn query/simulate ngốn gas vô hạn (chống DoS đọc).
+//   - CountTXDecorator: gán bộ đếm vị trí tx trong block — x/wasm dùng cho thứ tự
+//     & tính xác định khi sinh contract. Đặt ngay sau SetUpContext như wasmd.
 func NewPermissionlessAnteHandler(
 	ak authkeeper.AccountKeeper,
 	bk bankkeeper.Keeper,
 	signModeHandler *txsigning.HandlerMap,
+	txCounterStoreService corestoretypes.KVStoreService,
+	simGasLimit *storetypes.Gas,
 ) sdk.AnteHandler {
 	// ChainAnteDecorators: nối nhiều decorator thành 1 handler chạy theo thứ tự.
 	return sdk.ChainAnteDecorators(
-		authante.NewSetUpContextDecorator(),         // dựng ctx + đặt giới hạn gas.
+		authante.NewSetUpContextDecorator(),                       // dựng ctx + đặt giới hạn gas.
+		wasmkeeper.NewLimitSimulationGasDecorator(simGasLimit),    // giới hạn gas khi simulate (sau SetUpContext).
+		wasmkeeper.NewCountTXDecorator(txCounterStoreService),     // bộ đếm tx/block cho x/wasm.
 		authante.NewExtensionOptionsDecorator(nil),  // chặn extension option lạ.
 		authante.NewValidateBasicDecorator(),        // kiểm tra cơ bản (ValidateBasic).
 		authante.NewTxTimeoutHeightDecorator(),      // tx hết hạn theo block height.
