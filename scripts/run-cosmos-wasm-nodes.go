@@ -321,10 +321,18 @@ func (nm *nodeManager) preparePaths() error {
 		src := firstNonEmpty(nm.cfg.passphraseFile, os.Getenv("EVCOSMOS_PASSPHRASE_FILE"))
 		switch {
 		case src != "":
-			if _, err := os.Stat(src); err != nil {
-				return fmt.Errorf("prod passphrase file not found: %s: %w", src, err)
+			// Chuẩn hoá sang đường dẫn tuyệt đối (theo CWD của runner) vì các
+			// tiến trình con evcosmos chạy với cmd.Dir = apps/cosmos-wasm, nên
+			// path tương đối sẽ resolve sai ở subprocess (và lệch với os.Stat ở
+			// đây). Tuyệt đối thì cả runner lẫn subprocess đều mở đúng file.
+			abs, err := filepath.Abs(src)
+			if err != nil {
+				return fmt.Errorf("resolve passphrase file path %s: %w", src, err)
 			}
-			nm.passphraseFile = src
+			if _, err := os.Stat(abs); err != nil {
+				return fmt.Errorf("prod passphrase file not found: %s: %w", abs, err)
+			}
+			nm.passphraseFile = abs
 			nm.passphraseEphemeral = false
 		case os.Getenv("EVCOSMOS_PASSPHRASE") != "":
 			nm.passphraseFile = filepath.Join(baseDir, "passphrase.txt")

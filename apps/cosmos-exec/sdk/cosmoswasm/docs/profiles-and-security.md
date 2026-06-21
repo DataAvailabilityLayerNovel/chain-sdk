@@ -470,6 +470,27 @@ go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go \
 
 State sống dưới `.cosmos-wasm-runner/nodes/` và **sống sót qua restart**: dừng (Ctrl-C) rồi chạy lại cùng lệnh → orchestrator skip init (signer đã có) và resume từ height đã lưu — đúng nghĩa "ghi đĩa" của profile prod (mục 3).
 
+> **Cảnh báo passphrase (prod).** Prod **không** xoá state khi thoát, nên passphrase này trở thành **khoá mã hoá vĩnh viễn** của signer key trong `evcosmos-<name>/config/signer.json` của home đó — **hãy back up**. Nếu home prod đã có signer key từ lần chạy trước, bạn **phải dùng lại đúng passphrase gốc**; passphrase mới chỉ hoạt động với home mới tinh (hoặc đã được xoá). Đổi passphrase = phải re-init = `--clean-on-start=true` (mất chain state local, dựng lại từ DA).
+
+#### Xoá state để re-init (đổi passphrase / chain-id / genesis)
+
+```bash
+# Cách 1 — để orchestrator tự xoá lúc start (an toàn, đúng phạm vi):
+go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go \
+    --profile prod --clean-on-start=true \
+    --passphrase-file /secure/evcosmos-pass.txt --chain-id my-chain-1
+
+# Cách 2 — xoá thủ công TRƯỚC khi chạy:
+rm -rf .cosmos-wasm-runner/nodes            # xoá state 2 node (4 home), GIỮ log + passphrase.txt
+# hoặc xoá sạch cả base dir (kể cả log + passphrase.txt dev):
+rm -rf .cosmos-wasm-runner
+
+# Nếu dùng passphrase file tự sinh trong repo, xoá luôn khi bỏ:
+rm -f .cosmos-passphrase.txt
+```
+
+> `--clean-on-start=true` xoá **toàn bộ** 4 home (`evcosmos-*` + `cosmos-exec-*`) trước khi chạy ([preparePaths](../../../../../scripts/run-cosmos-wasm-nodes.go#L355-L361)) → signer key cũ mất, orchestrator init lại bằng passphrase bạn truyền lần này. Chain state local mất nhưng dựng lại được từ Celestia (xem [node-operations.md mục 5b.5](node-operations.md#5b5-sync-lại-từ-celestia-chạy-ra-sao)) — trừ signer key (key mới = địa chỉ proposer mới, phải khớp genesis).
+
 ### 9.5 Chạy nền dài hạn (không trông coi)
 
 Orchestrator chạy **fail-fast** (một process con chết → cả stack dừng, không tự restart) và block ở foreground. Với dev/thesis/single-host thì vậy là đủ. Nếu cần chạy nền lâu dài, bọc lệnh ở mục 9.4 trong một service `systemd` với `Restart=always` (hoặc `tmux`/`nohup` cho nhu cầu đơn giản) — không cần Docker.

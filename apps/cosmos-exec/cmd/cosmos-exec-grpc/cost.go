@@ -55,17 +55,20 @@ var (
 	costPolicyVal  costPolicy
 )
 
-// getCostPolicy returns the singleton policy loaded from env vars. Defaults
-// are sized for a Celestia-as-DA + Cosmos-SDK stake-token setup, but they're
-// intentionally low so that test runs surface a non-zero number without
-// distorting whether the tx is "expensive". Operators tune via env.
+// getCostPolicy returns the singleton policy loaded from env vars. The default
+// TIA-per-byte is the EFFECTIVE rate measured on-chain (total PFB fee.amount /
+// total blob bytes over 69 PayForBlobs submissions): 29481 utia / 172663 B =
+// 0.1707 utia/byte = 1.71e-7 TIA/byte. NOTE this folds in the large per-PFB
+// fixed cost (~301 utia) amortised across bytes; the marginal cost of an extra
+// byte is only ~0.05 utia/byte (5.0e-8 TIA/byte). See scripts/measure_da_fees.mjs.
 //
-// VI: trả về policy singleton (nạp 1 lần qua sync.Once, các lần sau dùng lại
-// giá trị đã cache). Giá trị mặc định cố tình để THẤP để test thấy số khác 0
-// mà không làm tx "đắt". Operator chỉnh qua ENV.
+// VI: TIA/byte mặc định là rate THỰC ĐO trên chuỗi (tổng fee PFB / tổng byte,
+// N=69): 0,1707 utia/byte = 1,71e-7 TIA/byte. Đây là rate "hiệu dụng" đã gộp chi
+// phí cố định ~301 utia/PFB; chi phí biên mỗi byte tăng thêm chỉ ~0,05 utia/byte.
+// Operator chỉnh qua ENV.
 func getCostPolicy() costPolicy {
 	costPolicyOnce.Do(func() {
-		tiaStr := envOr("COSMOS_EXEC_TIA_PER_BYTE", "0.0000001")
+		tiaStr := envOr("COSMOS_EXEC_TIA_PER_BYTE", "0.000000171")
 		gasStr := envOr("COSMOS_EXEC_MIN_GAS_PRICE", "0.000001")
 		costPolicyVal = costPolicy{
 			tiaPerByte:     mustBigFloat(tiaStr),

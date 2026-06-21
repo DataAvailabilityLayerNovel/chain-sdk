@@ -68,16 +68,50 @@ Mỗi block, ev-node submit lên Celestia dưới namespace (mặc định `roll
 
 ### Off-chain (local trên máy node) — cache/state để chạy
 
-Hai thư mục home **riêng cho mỗi node**, đặt ở project root:
+**Tất cả** runtime state sống dưới **một** base dir `.cosmos-wasm-runner/` ở project root (để repo root không bị rải rác dotfile). Mỗi node có **2 home tách biệt** vì 2 tiến trình (xem [mục 1](#1-mỗi-node--2-tiến-trình)): `evcosmos-<name>/` cho tầng đồng thuận, `cosmos-exec-<name>/` cho tầng execution. Layout đầy đủ ([preparePaths](../../../../../scripts/run-cosmos-wasm-nodes.go#L304-L353)):
 
-| Thư mục | Của | Chứa gì |
-|---------|-----|---------|
-| `.evcosmos-<name>/` | ev-node runtime | `config/genesis.json`, node config (yaml), signer key (passphrase từ `--evnode.signer.passphrase_file`), **store** (badger: headers, data, state, DA height đã xử lý) |
-| `.cosmos-exec-<name>/data/` | execution (`cosmos-exec-grpc --home`) | `metadata.json` (chainID, stateRoot, heights — ghi atomic+fsync), `tx_results.jsonl` (append-only kết quả tx), `blocks.jsonl` (append-only block info), + CosmWasm state store |
+```
+.cosmos-wasm-runner/
+├─ passphrase.txt                 # dev: "secret"; prod: từ --passphrase-file/ENV
+├─ logs/cosmos-wasm-chain.log     # log gộp cả 4 tiến trình (append-only)
+└─ nodes/
+   ├─ evcosmos-sequencer/         # ① ev-node home (đồng thuận) — sequencer
+   ├─ cosmos-exec-sequencer/      # ② cosmos-exec home (execution) — sequencer
+   ├─ evcosmos-fullnode/          # ① ev-node home (đồng thuận) — full node
+   └─ cosmos-exec-fullnode/       # ② cosmos-exec home (execution) — full node
+```
 
-`<name>` = `sequencer` hoặc `fullnode`. File bạn vừa mở `.cosmos-exec-fullnode/data/blocks.jsonl` chính là **block index off-chain của full node** (PersistStore, không phải dữ liệu đồng thuận — tái dựng được từ DA).
+`<name>` = `sequencer` hoặc `fullnode`. **Mỗi node = một cặp `evcosmos-<name>` + `cosmos-exec-<name>`** — không phải hai loại node khác nhau, mà là hai *tầng* của cùng một node.
 
-> Hệ quả: xóa các thư mục local = mất cache, **không mất chain** (sync lại từ Celestia). Nhưng đổi genesis/treasury chỉ áp khi **chưa có** state local — nên phải `--clean-on-start` (xóa home) để genesis mới có hiệu lực.
+**① `evcosmos-<name>/` — ev-node runtime (tầng đồng thuận)**, `--home` của `evcosmos`:
+
+| Đường dẫn | Chứa gì |
+|-----------|---------|
+| `config/genesis.json` | Genesis ev-node (chain_id, DAStartHeight, proposer; sequencer patch forced-inclusion rồi copy sang full node) |
+| `config/signer.json` | **Signer key đã mã hoá** (chỉ sequencer dùng để ký header; mở bằng passphrase từ `--evnode.signer.passphrase_file`) |
+| `config/*.yaml` | Node config (P2P, RPC, DA, block_time…) |
+| `data/cosmos-wasm/` | **Store đồng thuận** (badger): header, data (tx bytes), signature/commit, `State` (app_hash, **DAHeight đã xử lý**), index hash→height. Đây là store ở [mục 5b.3](#5b3-lưu-data-bằng-function-nào) |
+
+**② `cosmos-exec-<name>/` — execution (`cosmos-exec-grpc --home`)**, data dir = `<home>/data` ([ResolveDataDir](../../../config/config.go#L212-L218)):
+
+| Đường dẫn | Chứa gì |
+|-----------|---------|
+| `data/application/` | **State CosmWasm thật** (LevelDB tên `application`): balance account, contract state, store các module cosmos-sdk ([main.go openDatabase](../../../cmd/cosmos-exec-grpc/main.go#L255-L265)) |
+| `data/metadata.json` | Checkpoint executor: `chainID`, `stateRoot`, heights — ghi **đè** atomic+fsync mỗi lần đổi state |
+| `data/tx_results.jsonl` | Append-only: kết quả thực thi từng tx |
+| `data/blocks.jsonl` | Append-only: block info (index off-chain) |
+
+(File `metadata.json`/`*.jsonl` do `PersistStore` ghi — [persist.go](../../../executor/persist.go).)
+
+> **`evcosmos-fullnode` khác gì `cosmos-exec-fullnode`?** Cùng một full node, hai vai:
+> - `evcosmos-fullnode` = tầng **đồng thuận** — *block nào* (header đã ký, thứ tự tx, DAHeight đã sync). Đọc/ghi DA, P2P, verify chữ ký sequencer.
+> - `cosmos-exec-fullnode` = tầng **execution** — *state ra sao sau khi chạy tx* (balance, contract). Không biết gì về DA/P2P; chỉ nhận tx từ evcosmos qua gRPC, chạy lại, persist state.
+>
+> evcosmos là "sổ cái thứ tự + chứng minh", cosmos-exec là "máy tính ra số dư". Cặp `sequencer` đối xứng y hệt, chỉ khác sequencer **tạo+ký+submit** còn full node **đọc+chạy lại để verify**.
+
+> Hệ quả khi xóa:
+> - Xóa **cả** base dir = mất toàn bộ cache local, **không mất chain** (sync lại từ Celestia, dựng lại cả 2 tầng — xem [mục 5b.5](#5b5-sync-lại-từ-celestia-chạy-ra-sao)).
+> - Đổi genesis/treasury chỉ áp khi state local **chưa tồn tại** → phải `--clean-on-start` (xóa home) để genesis mới có hiệu lực. Prod mặc định `clean-on-start=false` nên **không** tự xóa.
 
 ## 5. Mọi biến đọc từ đâu
 

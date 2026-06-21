@@ -11,7 +11,7 @@
 //	# terminal 1 — start the chain (reads .env)
 //	go run -tags run_cosmos_wasm ./scripts/run-cosmos-wasm-nodes.go
 //
-//	# terminal 2 — build+drop the wasm (see ./contract/README.md), then:
+//	# terminal 2 — build+drop the wasm (see ./README.md), then:
 //	go run ./apps/cosmos-exec/sdk/cosmoswasm/examples/game-telemetry
 //
 // What it shows: compress → SubmitBlob → record in a match → retrieve → verify;
