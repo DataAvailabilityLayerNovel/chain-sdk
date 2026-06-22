@@ -56,19 +56,19 @@ var (
 )
 
 // getCostPolicy returns the singleton policy loaded from env vars. The default
-// TIA-per-byte is the EFFECTIVE rate measured on-chain (total PFB fee.amount /
-// total blob bytes over 69 PayForBlobs submissions): 29481 utia / 172663 B =
-// 0.1707 utia/byte = 1.71e-7 TIA/byte. NOTE this folds in the large per-PFB
-// fixed cost (~301 utia) amortised across bytes; the marginal cost of an extra
-// byte is only ~0.05 utia/byte (5.0e-8 TIA/byte). See scripts/measure_da_fees.mjs.
+// TIA-per-byte is the EFFECTIVE on-chain rate (total PFB fee.amount / total blob
+// bytes) measured over 69 PayForBlobs at minfee 0.004 utia/gas (0.1707 utia/byte =
+// 1.71e-7 TIA/byte), then scaled to the current network minfee 0.005 utia/gas:
+// 1.71e-7 × 0.005/0.004 = 2.14e-7 TIA/byte. It folds in the per-PFB fixed cost so
+// it stays conservative for small txs; the marginal cost of an extra byte is only
+// ~0.05 utia/byte. See scripts/measure_da_fees.mjs and docs/fee-economics.md §1c.
 //
-// VI: TIA/byte mặc định là rate THỰC ĐO trên chuỗi (tổng fee PFB / tổng byte,
-// N=69): 0,1707 utia/byte = 1,71e-7 TIA/byte. Đây là rate "hiệu dụng" đã gộp chi
-// phí cố định ~301 utia/PFB; chi phí biên mỗi byte tăng thêm chỉ ~0,05 utia/byte.
-// Operator chỉnh qua ENV.
+// VI: TIA/byte mặc định = rate hiệu dụng đo trên chuỗi (run N=69 ở minfee 0,004 =
+// 1,71e-7), scale lên minfee hiện hành 0,005 → 2,14e-7 TIA/byte. Gộp phí cố định
+// nên conservative cho tx nhỏ; chi phí biên mỗi byte chỉ ~0,05 utia/byte. Chỉnh qua ENV.
 func getCostPolicy() costPolicy {
 	costPolicyOnce.Do(func() {
-		tiaStr := envOr("COSMOS_EXEC_TIA_PER_BYTE", "0.000000171")
+		tiaStr := envOr("COSMOS_EXEC_TIA_PER_BYTE", "0.000000214")
 		gasStr := envOr("COSMOS_EXEC_MIN_GAS_PRICE", "0.000001")
 		costPolicyVal = costPolicy{
 			tiaPerByte:     mustBigFloat(tiaStr),

@@ -43,7 +43,7 @@ Hằng số (env, đọc 1 lần lúc khởi động — `getCostPolicy()`):
 
 | Env | Default | Ý nghĩa |
 |-----|---------|---------|
-| `COSMOS_EXEC_TIA_PER_BYTE` | `0.000000171` | Giá DA mỗi byte (TIA) — **rate hiệu dụng đo thực trên chuỗi** (xem Mục 1c) |
+| `COSMOS_EXEC_TIA_PER_BYTE` | `0.000000214` | Giá DA mỗi byte (TIA) — **rate hiệu dụng đo thực** (run 0,004) **scale lên minfee hiện hành 0,005** (xem Mục 1c) |
 | `COSMOS_EXEC_MIN_GAS_PRICE` | `0.000001` | Giá gas thực thi |
 | `COSMOS_EXEC_DA_DENOM` | `TIA` | Denom phần DA |
 | `COSMOS_EXEC_GAS_DENOM` | `ustake` | Denom phần gas |
@@ -51,9 +51,10 @@ Hằng số (env, đọc 1 lần lúc khởi động — `getCostPolicy()`):
 > **Lưu ý quan trọng — đây là MÔ HÌNH per-tx, không phải hoá đơn Celestia thật.**
 > `cost.go` chỉ tính `bytes × TIA_PER_BYTE` để dashboard ước lượng "phần DA gán cho
 > một tx". Hoá đơn TIA *thật* mà operator trả Celestia tính theo **gas/share** (Mục
-> 1c) và **không tuyến tính theo byte**. Mặc định `TIA_PER_BYTE = 1,71·10⁻⁷` ở đây
-> đã được đặt bằng **rate hiệu dụng đo thật** (tổng phí PFB / tổng byte blob qua 69
-> lần submit) thay cho hằng số bịa `1·10⁻⁷` cũ.
+> 1c) và **không tuyến tính theo byte**. Mặc định `TIA_PER_BYTE = 2,14·10⁻⁷` ở đây
+> = **rate hiệu dụng đo thật** (tổng phí PFB / tổng byte blob qua 69 lần submit ở
+> minfee 0,004 = 1,71·10⁻⁷) **scale lên minfee hiện hành 0,005** (×0,005/0,004),
+> thay cho hằng số bịa `1·10⁻⁷` cũ.
 
 Hiện chain chạy **ante 0-fee** (`NewPermissionlessAnteHandler`, `apps/cosmos-exec/app/ante.go`) nên con số này là **mô phỏng** — gọi `/tx/estimate` (`CostBreakdown`) để xem "production economics sẽ trông thế nào" mà không drain ví test. Bật fee thật = thay TxFeeChecker (mục 6).
 
@@ -205,9 +206,9 @@ Vì stack để node tự định giá, gas price thực bị chặn dưới b�
 - celestia-node khi `IsGasPriceSet=false` sẽ chọn một gas price **≥ max(sàn mạng,
   sàn node)**, chặn trên bởi `MaxGasPrice` (nếu set).
 
-⇒ Trên private net này, gas price node áp **= 0,004 utia/gas** (đo, xem mục C). Đó
-chính là sàn minfee/giá node của mạng private đang chạy — không phải `DA_GAS_PRICE`
-hay `COSMOS_EXEC_*`. Muốn xác nhận chính xác param: query module minfee của celestia-app
+⇒ Trên private net này, gas price node áp **= 0,004 utia/gas tại run đo 593k** (đo,
+xem mục C); **run hiện hành (611k+) đã = 0,005** — minfee mạng dịch theo thời gian.
+Đó là sàn minfee/giá node của mạng private — không phải `DA_GAS_PRICE` hay `COSMOS_EXEC_*`. Muốn xác nhận chính xác param: query module minfee của celestia-app
 (`celestia-appd query minfee params` hoặc gRPC `celestia.minfee.v1.Query/NetworkMinGasPrice`).
 
 ### C. Công thức: gas theo share, fee = gas × giá
@@ -262,11 +263,13 @@ Con số biên `5,0·10⁻⁸` khớp công thức lý thuyết ở mục C: `51
   (≈0,84 utia/byte) nhưng blob 3411B chỉ ~0,14 utia/byte. Đây là lý do blob-first
   **gom batch** (mục 3): chia phần cố định cho nhiều record.
 - **Hai lựa chọn rate cho `COSMOS_EXEC_TIA_PER_BYTE`:**
-  - **Hiệu dụng `1,71·10⁻⁷`** (default hiện tại): = tổng phí / tổng byte đo thật, đảm
-    bảo `Σ(bytes × rate)` ≈ tổng hoá đơn — hợp lý khi muốn fee thu bù đúng chi phí.
-  - **Biên `5,0·10⁻⁸`**: chỉ phần phí tăng thêm mỗi byte, KHÔNG gánh phần cố định —
-    dùng nếu muốn fee per-tx không "nói quá" với tx nhỏ (nhưng tổng sẽ hụt phần cố định).
-- Default đặt `1,71·10⁻⁷` (rate hiệu dụng đo thật) thay cho hằng `1·10⁻⁷` bịa trước đây.
+  - **Hiệu dụng `2,14·10⁻⁷`** (default hiện tại) = rate đo thật ở minfee 0,004
+    (`1,71·10⁻⁷`) scale lên minfee hiện hành 0,005: tổng phí / tổng byte, đảm bảo
+    `Σ(bytes × rate)` ≈ tổng hoá đơn — hợp lý khi muốn fee thu bù đúng chi phí.
+  - **Biên `6,3·10⁻⁸`** (≈ `5,0·10⁻⁸` ở 0,004 scale lên 0,005): chỉ phần phí tăng
+    thêm mỗi byte, KHÔNG gánh phần cố định — dùng nếu không muốn "nói quá" với tx nhỏ.
+- Default đặt `2,14·10⁻⁷` (rate hiệu dụng đo thật ở 0,004 scale lên minfee 0,005)
+  thay cho hằng `1·10⁻⁷` bịa trước đây.
 
 > Lưu ý phiên bản: các hằng (`GasPerBlobByte=8`, `PFBGasFixedCost`, `ShareSize=512`)
 > là default celestia-app (mirror tại celestia-node v0.28.4 trong
@@ -487,7 +490,7 @@ Không có bước này, chain bỏ qua cả chữ ký, sequence, gas **và** fe
 ### Bước 1 — Đặt giá (để `/tx/estimate` ra số đúng)
 
 ```bash
-export COSMOS_EXEC_TIA_PER_BYTE=0.000000171  # rate hiệu dụng ĐO THẬT (Mục 1c-D); đủ bù hóa đơn Celestia
+export COSMOS_EXEC_TIA_PER_BYTE=0.000000214  # rate hiệu dụng ĐO THẬT (Mục 1c-D, scale lên minfee 0,005); đủ bù hóa đơn Celestia
 export COSMOS_EXEC_MIN_GAS_PRICE=0.000001
 export COSMOS_EXEC_GAS_DENOM=ustake
 ```
