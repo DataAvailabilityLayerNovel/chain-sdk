@@ -12,6 +12,7 @@ Tài liệu này mô tả kiến trúc toàn bộ Cosmos/WASM stack — từ SDK
 - 5. cmd/cosmos-exec-grpc/ — HTTP API Server
 - 6. apps/cosmos-wasm/ — Full Node Binary (evcosmos)
 - 7. scripts/ — Dev Scripts
+- 8. ev-node framework — các folder gốc mà evcosmos build trên
 - Quan hệ giữa các component
 - API Tiers
 
@@ -45,7 +46,7 @@ Tài liệu này mô tả kiến trúc toàn bộ Cosmos/WASM stack — từ SDK
                        │ DA submit (via evcosmos)
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  evcosmos                  apps/cosmos-wasm/                  │
+│  evcosmos                  apps/cosmos-wasm/                 │
 │  Full node: sequencer, P2P, block production, DA sync        │
 └──────────────────────┬───────────────────────────────────────┘
                        │
@@ -77,6 +78,7 @@ User chỉ cần import package này. Tất cả các component bên dưới ch�
 | `doc.go` | Doc tổng quan package |
 | `sdk_config.go` | `SDKConfig`, `DefaultSDKConfig()`, `NewClientFromConfig()` — cấu hình timeout, retry, auth |
 | `client.go` | `Client` struct — method HTTP tới cosmos-exec: `SubmitTxBytes`, `SubmitTxBase64`, `GetTxResult`, `WaitTxResult`, `Status`, `GetTxFinality`, `WaitTxFinality`, `QuerySmart`, `QuerySmartRaw`, `FetchAccount` |
+| `client_extra.go` | Method `Client` bọc thêm endpoint dev-facing: `SimulateTx` (`/tx/simulate`), `EstimateCost` (`/tx/estimate`), `GetLatestBlock` / `GetBlockByHeight` (`/blocks/*`), `GetPendingTxCount` (`/tx/pending`). Kèm type `Coin`, `SimulateResponse`, `CostBreakdown`, `EstimateRequest`, `BlockInfo` |
 | `executor_client.go` | `ExecutorClient` interface — transport abstraction (HTTP / gRPC) |
 | `defaults.go` | Default constants: `DefaultPollInterval`, `DefaultTxTimeout` |
 | `errors.go` | `SDKError` struct (Op, Cause, Hint) + sentinel: `ErrNotReachable`, `ErrBlobTooLarge`, `ErrBlobStoreFull`, `ErrTxFailed`, `ErrContractMissing`, `ErrCommitMissing` |
@@ -87,6 +89,7 @@ User chỉ cần import package này. Tất cả các component bên dưới ch�
 | File | Vai trò |
 |------|---------|
 | `blob.go` | `BlobClient` + `BlobClientConfig`, `NewBlobClient()`, `SubmitBlob()`, `RetrieveBlob(height, commitment)`, `SubmitBatch()`, `VerifyBlob()` — **JSON-RPC thẳng tới Celestia bridge** (không qua executor) |
+| `blob_record.go` | `StoreBlobAndRecord()` / `StoreBatchAndRecord()` — gộp 1 call: upload blob lên DA + ghi commitment on-chain, message do dev dựng qua callback (không ép convention `record_blob`) |
 | `merkle.go` | `MerkleProof`, `ProofStep`. `BuildMerkleProof()`, `VerifyMerkleProof()`. Thin wrapper → `internal/merkle` |
 | `chunk.go` | `ChunkBlob()` / `ReassembleChunks()` + `ChunkMeta`. Thin wrapper → `internal/chunk` |
 | `compress.go` | `CompressGzip()`, `DecompressGzip()`, `CompressIfBeneficial()`, `MaybeDecompress()`, `IsGzipCompressed()`. Thin wrapper → `internal/compress` |
@@ -389,6 +392,102 @@ Binary riêng chạy rollup full node. Kết nối tới executor qua gRPC.
 | `deploy-sample-contract.sh` | Deploy sample WASM contract |
 | `submit-tx.sh` | Submit transaction via curl |
 | `verify-da-submit.sh` | Verify DA blob submission |
+
+---
+
+## 8. ev-node framework — các folder gốc mà evcosmos build trên
+
+> **Có cần dùng không? — Có.** `evcosmos` (mục 6) không phải binary độc lập: nó
+> là một rollup full node *build trên ev-node framework*. Các capability mà mục
+> 6 liệt kê — "sequencer, P2P, block production, DA sync" — đều đến từ các folder
+> gốc của repo (`block/`, `core/`, `node/`, `pkg/…`). `apps/cosmos-wasm/cmd/run.go`
+> import trực tiếp các package này; `executor_client.go` implement interface
+> `core/execution.Executor` rồi cắm nó vào framework.
+
+Nói cách khác, toàn bộ stack ở mục 1–6 là **execution side** (chạy WASM, trả
+state root); các folder dưới đây là **consensus/replication side** (sắp xếp tx,
+nhân bản block qua P2P, đẩy/đọc DA). evcosmos là điểm khâu hai phía lại:
+
+```
+evcosmos (apps/cosmos-wasm/)
+   │  implement core/execution.Executor  →  EnhancedExecutorClient
+   │      └─[HTTP/Connect-RPC]→ cosmos-exec-grpc (execution side, mục 1–5)
+   │                                 └─ serve bằng execution/grpc handler
+   │  wire vào ev-node framework:
+   ├──→ node/        assemble full/light node
+   ├──→ block/       sản xuất + đồng bộ + validate block
+   ├──→ pkg/sequencers/{single,based}   sắp xếp tx
+   ├──→ pkg/p2p      libp2p gossip + DHT
+   ├──→ pkg/store    block/state store (badger)
+   ├──→ pkg/da       client JSON-RPC tới Celestia
+   └──→ core/, types/, pkg/{config,genesis,cmd}
+```
+
+### Folder runtime — evcosmos phụ thuộc trực tiếp
+
+| Folder | Vai trò | evcosmos dùng vào |
+|--------|---------|-------------------|
+| `core/` | Package **zero-dependency** (có `go.mod` riêng) chỉ chứa interface + type: `core/execution.Executor`, `core/sequencer.Sequencer`, `core/da`. Mọi module khác chỉ phụ thuộc `core` để tránh import vòng. | `EnhancedExecutorClient` implement `core/execution.Executor`; sequencer implement `core/sequencer.Sequencer` |
+| `types/` | Cấu trúc dữ liệu block chạy qua toàn hệ: `Header`, `SignedHeader`, `Data`, `State`, hashing, serialization (`types/pb` = protobuf generated). | Block do `block/` sản xuất, `pkg/store` lưu, `pkg/p2p` gossip |
+| `block/` | **Block manager**: aggregation (sản xuất block từ tx do sequencer trả), sync (kéo block từ peer/DA), validate, áp state transition bằng cách gọi `Executor`. `public.go` là API, `internal/` là chi tiết. | Lõi block production + DA sync của full node |
+| `node/` | Lắp ráp **full node** (`full.go`) và **light node** (`light.go`): khâu executor + sequencer + P2P + store + DA + block manager thành một node chạy được; có failover, setup, helpers. | `run.go` gọi `node.NewNode(...)` |
+| `pkg/sequencers/` | Hai sequencer impl: `single` (single-sequencer mặc định) và `based` (based sequencer — lấy thứ tự tx thẳng từ DA, chống censorship). | Chọn theo cờ khi `evcosmos start` |
+| `pkg/p2p/` | Networking libp2p: GossipSub (phát tán header/block), Kademlia DHT (peer discovery), `key` (P2P identity). | Nhân bản block giữa các node |
+| `pkg/da/` | Client DA: `jsonrpc` (gọi Celestia bridge), `types` (interface `DA`). Đây là đường đẩy/đọc blob block lên Celestia ở tầng consensus. | DA submit + sync của full node |
+| `pkg/store/` | Block & state store trên đĩa (badger KV). | Lưu block đã commit, metadata chain |
+| `pkg/config/` | Config node ev-node (`rollconf`): root-dir, DA address, P2P, sequencer mode. | Đọc config lúc `init`/`start` |
+| `pkg/genesis/` | Load + validate genesis chung của ev-node. | Khởi tạo chain identity |
+| `pkg/cmd/` | Helper CLI dùng chung (`rollcmd`): flags, lifecycle start/stop chuẩn. | `init.go` / `run.go` build trên đó |
+| `execution/grpc/` | Handler + server + client Connect-RPC cho `core/execution.Executor`. | **Server-side dùng thật**: cosmos-exec-grpc (mục 5) gọi `execgrpc.NewExecutorServiceHandlerWithMux(cosmosExecutor, …)` ([main.go:140](../../cmd/cosmos-exec-grpc/main.go#L140)) để expose Executor; `EnhancedExecutorClient` của evcosmos là client nói chuyện với handler này |
+| `proto/` | Nguồn protobuf (`proto/evnode/v1/*`, `proto/execution/*`). Sinh ra Go (`types/pb`) và Rust (`client/crates`). | Không import lúc runtime; là **source-of-truth** cho wire format |
+
+`pkg/` còn các tiện ích hạ tầng dùng gián tiếp: `hash`, `os`, `raft` (sequencer HA), `rpc`, `service` (lifecycle base), `signer`, `sync`, `telemetry`.
+
+### Tầng dưới của `block/` — `block/internal/*`
+
+`block/public.go` chỉ là mặt API mỏng. Toàn bộ logic nằm trong `block/internal/`,
+chia theo *vai trò trong vòng đời block* (mỗi sub-package là một "trạm" trên đường
+đi của block). Compiler chặn import từ ngoài → các trạm này refactor tự do.
+
+| Sub-package | Vai trò | File chính |
+|-------------|---------|------------|
+| `internal/executing` | **Aggregation / block production.** Sequencer (leader) sản xuất block mới: gom tx, dựng header+data, gọi `Executor.ExecuteTxs` để áp state transition rồi lấy state root. | `block_producer.go`, `executor.go`, `pending.go`, `utils.go` |
+| `internal/reaping` | **Reaper** — định kỳ kéo tx từ mempool của execution layer (`Executor.GetTxs`) đẩy vào sequencer để chờ đóng block. | `reaper.go` |
+| `internal/syncing` | **Sync path (follower).** Node không phải leader kéo block về và replay: lấy từ P2P (`p2p_handler.go`), từ DA (`da_retriever.go`, `da_follower.go`), hoặc từ Raft (`raft_retriever.go`); `syncer.go`/`block_syncer.go` điều phối, validate, áp state. | `syncer.go`, `block_syncer.go`, `da_follower.go`, `da_retriever.go`, `p2p_handler.go`, `raft_retriever.go` |
+| `internal/submitting` | **DA submitter.** Đóng gói block đã commit thành blob và đẩy lên Celestia; `batching_strategy.go` quyết định gom bao nhiêu block / kích thước mỗi lần submit. | `submitter.go`, `da_submitter.go`, `batching_strategy.go` |
+| `internal/da` | **Adapter `block ↔ pkg/da`.** Bọc client DA cho block manager: kéo block bất đồng bộ (`async_block_retriever.go`), lấy tx forced-inclusion thẳng từ DA (`forced_inclusion_retriever.go`), tracing. | `client.go`, `async_block_retriever.go`, `forced_inclusion_retriever.go`, `interface.go` |
+| `internal/cache` | **Cache block/header pending.** Giữ header & data đã nhận nhưng *chưa* được DA xác nhận / chưa tới lượt apply, tránh fetch lại; `manager.go` điều phối, `pending_headers.go`/`pending_data.go` là hàng đợi pending, `generic_cache.go` là cache key→value tổng quát. | `manager.go`, `generic_cache.go`, `pending_headers.go`, `pending_data.go`, `pending_base.go` |
+| `internal/pruner` | **Pruner** — xoá block/state cũ vượt ngưỡng giữ lại để giới hạn dung lượng đĩa. | `pruner.go` |
+| `internal/common` | **Shared kit** cho tất cả trạm trên: hằng số, error, event, metrics, options, helper `raft`, `replay`, `retry`, và `expected_interfaces.go` (các interface mà block manager kỳ vọng từ executor/sequencer/DA/store). | `consts.go`, `errors.go`, `event.go`, `metrics.go`, `options.go`, `expected_interfaces.go`, `retry.go`, `replay.go` |
+
+Dòng chảy gọn: `reaping` → `executing` (leader sản xuất) → `submitting` (đẩy DA);
+song song, follower chạy `syncing` (kéo qua P2P/DA) → áp state; `da`/`cache` phục
+vụ cả hai chiều, `pruner` dọn dẹp nền.
+
+### Tầng dưới của `node/` và `pkg/*`
+
+| Folder | Sub-folder / file | Vai trò |
+|--------|-------------------|---------|
+| `node/` | `full.go` / `light.go` | Lắp ráp full node (có block production + DA submit) vs light node (chỉ verify header). |
+| `node/` | `node.go`, `setup.go`, `helpers.go`, `failover.go` | Interface `Node` chung, wiring khởi tạo, helper, và failover leader (Raft) cho HA. |
+| `pkg/p2p/` | `client.go`, `peer.go`, `rpc.go`, `metrics.go` | Lõi libp2p: kết nối, quản lý peer, RPC giữa node, metrics. |
+| `pkg/p2p/` | `key/` (`nodekey.go`) | P2P identity — sinh/đọc khoá định danh node trên mạng. |
+| `pkg/da/` | `types/` (`types.go`, `blob.go`, `header.go`, `namespace.go`, `errors.go`) | Interface `DA` + kiểu blob/namespace/error — abstraction tầng DA (không gắn Celestia). |
+| `pkg/da/` | `jsonrpc/` (`client.go`, `blob.go`, `submit_options.go`) | Triển khai cụ thể: client JSON-RPC nói chuyện với Celestia bridge. |
+| `pkg/sequencers/` | `single/` (`sequencer.go`, `queue.go`) | Single-sequencer mặc định + hàng đợi tx in-memory. |
+| `pkg/sequencers/` | `based/` (`sequencer.go`) | Based sequencer — lấy thứ tự tx thẳng từ DA (chống censorship). |
+| `pkg/sequencers/` | `common/` (`checkpoint.go`) | Dùng chung: checkpoint, mock forced-inclusion. |
+| `pkg/store/` | `store.go`, `cached_store.go`, `batch.go`, `kv.go`, `keys.go`, `badger_options.go` | Block/state store trên badger KV: store gốc, lớp cache, batch ghi, schema key, tuỳ chọn badger. |
+| `pkg/signer/` | `local.go`, `noop/`, `file/` | Ký header/block: in-memory, no-op (test), và khoá lưu file. |
+
+### Folder phụ trợ — KHÔNG nằm trong runtime path, nhưng KHÔNG nên xoá
+
+| Folder | Vai trò | Tại sao giữ lại |
+|--------|---------|------------------------|
+| `client/` | Thư viện client đa ngôn ngữ cho **người dùng ngoài**: `crates/` (Rust: `ev-types`, `ev-client`), `go/`. | Không file Go nào trong repo import, nhưng là **public API** cho app ngoài gọi vào ev-node node (kế thừa từ upstream). Chỉ xoá khi xác nhận bỏ hỗ trợ multi-language client. Lưu ý: SDK Go ở mục 1 nằm tại `apps/cosmos-exec/sdk/cosmoswasm`, **khác** với `client/go/`. |
+| `tools/` | CLI debug độc lập: `blob-decoder`, `cosmos-explorer`, `da-debug`, `cache-analyzer`, `db-bench`, `local-da`, `evnode-rpc`, `cosmos-wasm-tx`. | Không bị import, nhưng có **recipe build** trong [`.just/tools.just`](../../../../.just/tools.just) và chứa `cosmos-explorer` / `cosmos-wasm-tx` phục vụ trực tiếp stack này. Là tooling dev/ops chủ động. |
+
+**Tóm tắt:** `core/`, `types/`, `block/`, `node/`, `pkg/*`, `execution/grpc/`, `proto/` là tầng framework bắt buộc nằm dưới (hoặc serve cho) evcosmos — giữ lại và đã giải thích ở trên. `client/` và `tools/` không thuộc đường chạy của stack nhưng là public API + tooling có recipe build, nên **không có folder nào nên xoá**.
 
 ---
 

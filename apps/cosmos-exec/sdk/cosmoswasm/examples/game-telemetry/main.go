@@ -125,14 +125,35 @@ func main() {
 	for i := 0; i < *frames; i++ {
 		raw, _ := json.Marshal(makeFrame("match-42", i))
 		payload, did := cosmoswasm.CompressIfBeneficial(raw)
-		sub, err := bc.SubmitBlob(ctx, payload)
-		if err != nil {
-			log.Fatalf("submit frame %d: %v", i, err)
-		}
-		log.Printf("[frame %d] %d→%d bytes (compressed=%v) → Celestia commitment=%s height=%d",
-			i, len(raw), len(payload), did, short(sub.Commitment), sub.Height)
+
+		var sub *cosmoswasm.BlobSubmitResponse
+		var err error
 		if contractAddr != "" {
-			recordTelemetry(ctx, client, signer, contractAddr, matchID, sub)
+			// StoreBlobAndRecord gộp upload-lên-DA + ghi-commitment-on-chain trong
+			// MỘT call; callback giữ message record_telemetry riêng của contract.
+			var txHash string
+			sub, txHash, err = cosmoswasm.StoreBlobAndRecord(ctx, bc, client, signer, contractAddr, payload,
+				func(b *cosmoswasm.BlobSubmitResponse, nsHex string) any {
+					return map[string]any{"record_telemetry": map[string]any{
+						"match_id":   matchID,
+						"commitment": b.Commitment,
+						"height":     b.Height,
+						"namespace":  b.Namespace,
+					}}
+				})
+			if err != nil {
+				log.Fatalf("store+record frame %d: %v", i, err)
+			}
+			log.Printf("[frame %d] %d→%d bytes (compressed=%v) → DA commitment=%s height=%d, recorded tx=%s",
+				i, len(raw), len(payload), did, short(sub.Commitment), sub.Height, short(txHash))
+		} else {
+			// Không có contract: chỉ lên DA, không ghi on-chain.
+			sub, err = bc.SubmitBlob(ctx, payload)
+			if err != nil {
+				log.Fatalf("submit frame %d: %v", i, err)
+			}
+			log.Printf("[frame %d] %d→%d bytes (compressed=%v) → DA commitment=%s height=%d (off-chain only)",
+				i, len(raw), len(payload), did, short(sub.Commitment), sub.Height)
 		}
 		lastSub = sub
 	}
@@ -274,17 +295,6 @@ func registerPlayer(ctx context.Context, client *cosmoswasm.Client, signer *cosm
 		}
 		log.Fatalf("register_player failed (code=%d): %s", res.Code, res.Log)
 	}
-}
-
-func recordTelemetry(ctx context.Context, client *cosmoswasm.Client, signer *cosmoswasm.Signer, contract string, matchID uint64, sub *cosmoswasm.BlobSubmitResponse) {
-	execGame(ctx, client, signer, contract, map[string]any{
-		"record_telemetry": map[string]any{
-			"match_id":   matchID,
-			"commitment": sub.Commitment,
-			"height":     sub.Height,
-			"namespace":  sub.Namespace,
-		},
-	})
 }
 
 func recordReplay(ctx context.Context, client *cosmoswasm.Client, signer *cosmoswasm.Signer, contract string, matchID uint64, res *cosmoswasm.BlobBatchResponse, nsHex string) {

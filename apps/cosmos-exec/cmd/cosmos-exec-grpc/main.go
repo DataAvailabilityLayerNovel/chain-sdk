@@ -84,7 +84,7 @@ func main() {
 		level = zerolog.InfoLevel
 	}
 	logger := log.NewLogger(os.Stdout, log.LevelOption(level)) // log ra stdout.
-	application := app.New(logger, database)                   // dựng app blockchain.
+	application := app.New(logger, database, cfg.Home)         // dựng app; cache WASM dưới <Home>/wasm.
 
 	// Build executor options.
 	// VI: bắt đầu danh sách option cho executor; ... để spread vào New() sau.

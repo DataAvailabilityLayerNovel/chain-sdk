@@ -17,7 +17,7 @@ import (
 
 func newTestExecutor(t *testing.T) *executor.CosmosExecutor {
 	t.Helper()
-	return executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	return executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 }
 
 func initExecutor(t *testing.T, exec *executor.CosmosExecutor) []byte {

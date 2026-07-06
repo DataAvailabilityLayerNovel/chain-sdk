@@ -136,6 +136,45 @@ tx, _ := cosmoswasm.BuildBatchRootTx(cosmoswasm.BatchRootTxRequest{
 Membership của từng blob trong root chứng minh được bằng Merkle proof public:
 `BuildMerkleProof(res.Commitments, i)` → `VerifyMerkleProof(proof)` (xem Mục 7b).
 
+### 6.1 `SubmitBatch` làm gì, từng bước ([blob.go:190](../blob.go#L190))
+
+```
+blobs [][]byte
+  │  ① validate: không rỗng; mỗi blob không rỗng; TỔNG bytes ≤ MaxBatchTotal
+  ▼
+  │  ② mỗi data → jsonrpc.NewBlobV0(ns, data)  → blob.Commitment (NMT, 32B)
+  │      thu commitments[] = hex của từng commitment (THỨ TỰ = thứ tự input)
+  ▼
+  │  ③ da.Blob.Submit(daBlobs, opts)  ← MỘT lần gọi cho CẢ N blob
+  │      → trả về MỘT height duy nhất cho toàn batch
+  ▼
+  │  ④ merkle.BuildProof(commitments, 0) → lấy Root (path của leaf 0 bị bỏ)
+  ▼
+BlobBatchResponse{ Root, Commitments[], Count, Height }
+```
+
+Những điểm phải nắm:
+
+- **Nguyên tử theo height.** Cả N blob vào Celestia trong **một** `Blob.Submit`, nên
+  hoặc tất cả cùng land ở **một** `Height`, hoặc submit lỗi và **không** cái nào land.
+  Không có chuyện batch "land một nửa".
+- **`Height` là khóa dùng chung để retrieve từng blob.** Lấy blob thứ `i` về:
+  `RetrieveBlob(ctx, res.Height, res.Commitments[i])` — cùng height, khác commitment.
+  Mất `Height` = mất cả batch (giống blob lẻ, xem **Mục 4**).
+- **Thứ tự `Commitments[]` = thứ tự `blobs[]` đầu vào, và là cố định.** Merkle root
+  phụ thuộc thứ tự này; đảo thứ tự → root khác. `BuildMerkleProof(res.Commitments, i)`
+  cũng đánh index theo đúng thứ tự đó — nên **đừng sort/reorder** `Commitments` trước khi tạo proof.
+- **`Root` KHÁC bản chất với `Commitments[i]`.** `Commitments[i]` là NMT commitment do
+  Celestia tính ("blob nằm trên Celestia"); `Root` là SHA-256 Merkle tree **của SDK**
+  gom N commitment lại ("N blob này thuộc cùng một batch của tôi"). Ghi on-chain chỉ 1 `Root`.
+- **Giới hạn `MaxBatchTotal`.** Vòng lặp cộng dồn `len(data)`; vượt trần → lỗi ngay
+  (không submit gì). Đây là trần **tổng** của batch, khác `MaxBlobSize` (trần từng blob).
+- **Lỗi từng bước đều fail-fast, chưa tốn DA.** Blob rỗng / vượt trần / `NewBlobV0` lỗi
+  đều trả lỗi **trước** khi gọi `Blob.Submit` → không mất phí DA cho batch hỏng.
+
+> **N = 1:** batch một phần tử hợp lệ — `Root` bằng luôn `Commitments[0]` (cây 1 lá),
+> và `BuildMerkleProof(..., 0)` trả `Path` rỗng. Verify vẫn chạy đúng (xem [7b.c](#c-merkle-proof--chứng-minh-1-blob-thuộc-batch-đã-neo)).
+
 ## 7. Xác minh (verifiable)
 
 Hai mức:
@@ -214,6 +253,65 @@ err := VerifyMerkleProof(proof)                     // path hợp lệ?
 // ⚠️ verifier PHẢI tự kiểm proof.Root == root đã neo on-chain — VerifyMerkleProof
 // chỉ kiểm tính nhất quán của path, KHÔNG biết root nào đáng tin.
 ```
+
+#### Cây được dựng thế nào ([internal/merkle](../internal/merkle/merkle.go))
+
+- **Lá (leaf) = chính commitment 32 byte**, KHÔNG hash lại. Danh sách lá đúng theo
+  thứ tự `Commitments[]`.
+- **Nút trong = `sha256(left ‖ right)`** — nối 32B trái + 32B phải rồi băm.
+- **Số nút lẻ ở một tầng → nhân đôi nút cuối** (`right = left`). Vd 3 lá `[A,B,C]`:
+
+```
+tầng lá:   A      B      C
+             \    /      | (C ghép với chính nó)
+tầng 1:   H(A‖B)      H(C‖C)
+              \          /
+root:      H( H(A‖B) ‖ H(C‖C) )
+```
+
+#### `BuildMerkleProof` sinh ra gì
+
+Trả `MerkleProof{Root, Commitment, Index, Path}`, trong đó `Path` là danh sách
+`ProofStep{SiblingHash, IsLeft}` — mỗi bước từ lá đi lên là **hash anh em** cần ghép
+và cờ **anh em nằm bên trái hay phải**. Độ dài `Path` ≈ `log₂(N)`. Đây là toàn bộ
+thứ verifier cần: **không** phải cầm N commitment, chỉ ~log₂(N) hash.
+
+#### `VerifyMerkleProof` kiểm thế nào ([Verify](../internal/merkle/merkle.go#L81))
+
+```
+current = proof.Commitment            // bắt đầu từ lá
+với mỗi step trong proof.Path:
+    if step.IsLeft:  current = sha256(step.SiblingHash ‖ current)
+    else:            current = sha256(current ‖ step.SiblingHash)
+return current == proof.Root ? OK : lỗi
+```
+
+Nó chỉ trả lời đúng một câu: *"đi từ `Commitment` theo `Path` có ra `Root` không?"*.
+
+**Bắt buộc hiểu — VerifyMerkleProof KHÔNG đủ để tin:** nó **tự dựng** rồi so với
+`proof.Root` **do chính proof mang theo**. Kẻ tấn công có thể bịa ra một cây giả
+hoàn toàn nhất quán (commitment giả + path giả + root giả) và `VerifyMerkleProof`
+vẫn trả `nil`. Muốn tin thật, verifier phải làm **hai việc**:
+
+1. `VerifyMerkleProof(proof)` → path nội bộ nhất quán, **và**
+2. **Tự đối chiếu** `proof.Root` **== root đã neo on-chain** (đọc từ contract nơi
+   `BuildBatchRootTx` đã ghi). Bước 2 mới là chỗ "root nào đáng tin" đến từ chain.
+
+Bỏ bước 2 = proof vô nghĩa về mặt bảo mật.
+
+#### Vài cạnh cần lưu ý
+
+- **`Index` chỉ để tham khảo.** Vị trí lá thực sự được mã hoá bằng cờ `IsLeft` trong
+  từng `ProofStep`, không phải bằng `proof.Index`. `Verify` không đọc `Index`.
+- **N = 1:** `Path` rỗng → `current` = `Commitment` = `Root` ngay → hợp lệ (khớp ghi
+  chú ở [6.1](#61-submitbatch-làm-gì-từng-bước-blobgo190)).
+- **⚠️ Malleability của kiểu "nhân đôi nút cuối" + không domain-separation.** Vì lá và
+  nút trong đều băm bằng `sha256` **không có tiền tố phân biệt**, và tầng lẻ nhân đôi
+  nút cuối, cây này có điểm yếu kinh điển (kiểu CVE-2012-2459): có thể tồn tại tập lá
+  khác cho **cùng một root**. Với blob-first thì rủi ro thấp (verifier neo root
+  on-chain và thường biết `Count`), nhưng **đừng** dùng cây SDK này làm bằng chứng
+  chống-gian-lận độc lập cho giá trị lớn nếu không kèm ràng buộc `Count`/độ sâu. Cho
+  nhu cầu mạnh hơn, dùng thẳng **DA-inclusion proof (NMT)** của Celestia ([Mục 7](#7-xác-minh-verifiable)).
 
 > Cây Merkle này là SHA-256 nhị phân CỦA SDK (gom các commitment), KHÁC với NMT
 > commitment của từng blob do Celestia tính. NMT chứng minh "blob nằm trên

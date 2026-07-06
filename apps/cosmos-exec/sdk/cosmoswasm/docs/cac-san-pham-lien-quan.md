@@ -20,7 +20,7 @@ rollup), nhất là chuỗi có hợp đồng thông minh. Mỗi mục gồm b�
 - [3. Dymension RDK — RollApp neo trên hub](#3-dymension-rdk--rollapp-neo-trên-hub)
 - [4. App-chain CosmWasm truyền thống (Juno, Neutron, Stargaze, Osmosis)](#4-app-chain-cosmwasm-truyền-thống-juno-neutron-stargaze-osmosis)
 - [5. Bộ khung rollup hệ Ethereum (OP Stack, Arbitrum Orbit, Polygon CDK)](#5-bộ-khung-rollup-hệ-ethereum-op-stack-arbitrum-orbit-polygon-cdk)
-- [6. Astria — mạng sequencer dùng chung](#6-astria--mạng-sequencer-dùng-chung)
+- [6. Mạng sequencer dùng chung (Astria & Espresso)](#6-mạng-sequencer-dùng-chung-astria--espresso)
 - [7. Các lớp sẵn sàng dữ liệu thay thế (EigenDA, Avail, EIP-4844)](#7-các-lớp-sẵn-sàng-dữ-liệu-thay-thế-eigenda-avail-eip-4844)
 - [8. evstack/wasmd — wasmd thuần trên CometBFT](#8-evstackwasmd--wasmd-thuần-trên-cometbft)
 - [9. Bảng tổng hợp các trục so sánh](#9-bảng-tổng-hợp-các-trục-so-sánh)
@@ -75,7 +75,8 @@ Các con số này là chuẩn để đối chiếu với từng giải pháp b�
 > chỉ trả `Height` + `BlobSize`); số đúng nằm ở `fee.amount` của giao dịch
 > **PayForBlobs** trên chuỗi. Script `scripts/measure_da_fees.mjs` (trong FE)
 > quét block celestia-app qua CometBFT RPC, gỡ lớp bọc IndexWrapper/BlobTx,
-> decode `AuthInfo.fee` và in bảng + thống kê. Số trên đo ngày 2026-06-19,
+> decode `AuthInfo.fee` và in bảng + thống kê (**phương pháp + code minh hoạ đầy
+> đủ ở fee-economics §1c-D2**). Số trên đo ngày 2026-06-19,
 > height DA 593051–593129 (**run cũ**). Lưu ý: giá thực tế ≈ 0,004 utia/gas
 > (fee.amount / gas_limit), thấp hơn `DA_GAS_PRICE = 0,005` đã cấu hình — nên dùng
 > số đo on-chain thay vì nhân thủ công gas × giá cấu hình. **Run sau** (height
@@ -91,9 +92,16 @@ Cosmos SDK trên ev-node. Đây là đối tượng so sánh gần nhất với 
 của đồ án.
 
 **Cách hoạt động.** Cosmos SDK được thiết kế để nói chuyện với một động cơ đồng
-thuận qua giao thức ABCI (InitChain, FinalizeBlock, Commit, Query). ev-abci đứng
-giữa và **dịch** lời gọi từ giao diện thực thi của ev-node sang ABCI, rồi dịch
-kết quả ngược lại — đóng vai một động cơ đồng thuận giả lập trước ứng dụng.
+thuận qua giao thức ABCI (InitChain, PrepareProposal, ProcessProposal,
+FinalizeBlock, Commit, Query). Bình thường động cơ đó là CometBFT. ev-abci **thay
+chỗ CometBFT**: nó là một thư viện (library) được nhúng vào binary ev-node, hiện
+thực giao diện `execution.Executor` của ev-node ở một đầu, và ở đầu kia đóng vai
+một **động cơ đồng thuận giả lập** (consensus shim) nói ABCI với ứng dụng. Mỗi khi
+ev-node cần một việc (khởi tạo chain, lấy tx, thực thi block, chốt block), nó gọi
+executor; ev-abci **dịch** lời gọi đó sang một hoặc nhiều lời gọi ABCI tới
+`app.App`, rồi **dịch kết quả ngược lại** cho ev-node. Ứng dụng bên trong tưởng
+như đang chạy dưới CometBFT nên **không cần sửa gì** — đó là lý do ev-abci là con
+đường tương thích phổ quát.
 
 ```
   ev-abci (khuyến nghị)                 Đồ án (tự cài)
@@ -108,8 +116,60 @@ kết quả ngược lại — đóng vai một động cơ đồng thuận gi�
   (InitChain/FinalizeBlock/Commit)      (FinalizeBlock/Commit)
 ```
 
+**Ánh xạ từng lời gọi executor → ABCI.** ev-node điều khiển vòng đời block qua 6
+phương thức của `execution.Executor`; ev-abci ánh xạ chúng sang ABCI 2.0 như sau:
+
+| Lời gọi của ev-node | ev-abci làm gì (ABCI 2.0) |
+|---------------------|----------------------------|
+| `InitChain` | Nạp genesis doc từ file, gọi `app.InitChain()`, khởi tạo validator set trong store |
+| `GetTxs` | `mempool.ReapMaxBytesMaxGas()` — lấy tx từ mempool kiểu CometBFT (đã qua CheckTx, có tính gas) |
+| `ExecuteTxs` | `PrepareProposal` → `ProcessProposal` → `FinalizeBlock` → `Commit`, trả về `AppHash` |
+| `SetFinal` | Publish block events đã xếp hàng (NewBlock, Tx…) qua event bus kiểu CometBFT |
+| `GetExecutionInfo` | Đọc `MaxGas` từ consensus params do app định nghĩa |
+| `FilterTxs` | Lọc theo gas + kích thước + tính hợp lệ của từng tx |
+
+Điểm cốt lõi ở `ExecuteTxs`: khác với việc gọi thẳng, ev-abci chạy **đủ nghi thức
+đề xuất block của ABCI 2.0**. `PrepareProposal` cho phép ứng dụng **sắp xếp lại /
+lọc** danh sách tx (hữu ích cho chống MEV, ưu tiên tx); `ProcessProposal` cho ứng
+dụng **xác minh** block đề xuất trước khi thực thi; rồi `FinalizeBlock` thực thi
+**cả lô tx trong một lời gọi** (thay cho BeginBlock/DeliverTx×N/EndBlock của ABCI
+1.0), cuối cùng `Commit` chốt state và trả về `AppHash`.
+
+**Các dịch vụ ev-abci gắn kèm (vì nó thay chỗ CometBFT).** Do đứng đúng vị trí
+động cơ đồng thuận, ev-abci phải tái tạo những thứ CometBFT vốn cung cấp, tất cả
+**chạy chung một tiến trình** với ev-node:
+
+- **Mempool kiểu CometBFT** — có `CheckTx` (chạy ABCI để loại tx sai *trước* khi
+  vào block), tính gas theo tx, ưu tiên, chống trùng (mempool_ids), chính sách
+  eviction.
+- **P2P tx gossip (libp2p)** — các node phát tán tx đang chờ cho nhau nên mempool
+  đồng bộ giữa nhiều node; tách biệt với kênh gossip block của ev-node.
+- **RPC tương thích CometBFT** — server JSON-RPC/WebSocket với `broadcast_tx_*`,
+  `abci_query`, `block`, `tx`, `validators`, `status`… nên **Keplr, CosmJS, CLI
+  Cosmos** dùng được ngay không cần client riêng.
+- **Store + validator/signature providers** — lưu validator set theo height,
+  consensus params, last-commit info và tạo chữ ký kiểu CometBFT cho
+  sequencer/sync node (cần cho `LastCommitInfo` trong `FinalizeBlock`), đồng thời
+  hỗ trợ **di trú (migration)** một chain CometBFT đang chạy sang Evolve.
+- **Module Cosmos SDK thay thế** — bản staking dạng wrapper (no-op cho
+  slashing/jailing/validator update vì ev-node không có validator set) và
+  migration-manager để chuyển validator set → cấu hình sequencer tại một height
+  xác định.
+
+Tóm lại, ev-abci là **một lớp tương thích đầy đủ**: nó không chỉ "dịch một hàm"
+mà giả lập gần như toàn bộ bề mặt CometBFT (mempool, P2P, RPC, event bus,
+validator) để bất kỳ ABCI app nào chạy y nguyên. Đổi lại là **thêm một tầng** trên
+đường đi giao dịch và kéo theo tập phụ thuộc lớn hơn. Đồ án đi hướng ngược lại:
+CosmosExecutor hiện thực thẳng `execution.Executor` và gọi trực tiếp BaseApp trong
+cùng tiến trình (ABCI 1.0: BeginBlock → DeliverTx×N → EndBlock → Commit), bỏ tầng
+dịch và bỏ luôn những dịch vụ tương thích không cần cho use case blob-first —
+xem so sánh chi tiết ở [cosmos-vs-evabci.md](cosmos-vs-evabci.md).
+
 **Số liệu và dẫn chứng.**
-- Mã nguồn ev-abci: <https://github.com/evstack/ev-abci>
+- Mã nguồn ev-abci: <https://github.com/evstack/ev-abci> — cốt lõi ở
+  `pkg/adapter/adapter.go` (executor + ABCI bridge), `pkg/adapter/providers.go`
+  (chữ ký + validator), `pkg/rpc/` (RPC tương thích CometBFT), `pkg/p2p/` (tx
+  gossip), `modules/` (staking wrapper + migration manager).
 - Đặc tả ABCI 2.0 (PrepareProposal/ProcessProposal/FinalizeBlock): <https://docs.cometbft.com/v1.0/spec/abci/>
 - Khác biệt định lượng có thể nêu: số tầng trên đường đi giao dịch (đồ án bỏ 1
   tầng dịch ABCI), và số dependency kéo theo — nên đối chiếu bằng cách đếm trực
@@ -205,6 +265,35 @@ module wasmd trong app.
   finality tức thì (1 block)               soft (~2s) → DA-final (~14s)
 ```
 
+**Kinh tế token & phần thưởng (bộ ba `x/staking` + `x/mint` + `x/distribution`).**
+Các chain PoS **chủ quyền** (Juno, Stargaze, Osmosis) chạy đúng mô hình Cosmos SDK
+chuẩn:
+
+- **`x/staking`** — delegator khoá (bond) token vào validator; **quyền biểu quyết ∝
+  lượng stake**; validator gian lận/offline bị **slash** (cắt stake). Đây là nguồn an ninh.
+- **`x/mint`** — **mint token mới mỗi block** theo lịch lạm phát (inflation rate thường
+  tự điều chỉnh về một tỉ lệ bonded mục tiêu). Token mới sinh ra là "ngân sách phần thưởng".
+- **`x/distribution`** — gom **lạm phát vừa mint + phí giao dịch** (trong `fee_collector`)
+  rồi **chia** cho validator (hoa hồng) và delegator theo tỉ lệ stake; một phần trích vào
+  **community pool** (community tax).
+
+Nên vòng đời phần thưởng đúng như bạn mô tả: *mỗi block → mint lạm phát → distribute cho
+người stake + cộng phí đã thu*. Người bảo vệ mạng (validator/delegator) được trả bằng
+**token mới phát hành + phí**.
+
+> **Ngoại lệ Neutron — KHÔNG mint để bảo mật.** Neutron là **consumer chain** (ICS/
+> Replicated Security): validator là của **Cosmos Hub**, an ninh "thuê" từ ATOM stakers
+> trên Hub, nên Neutron **không có `x/mint` lạm phát** cho an ninh. Phần thưởng đến từ
+> **phí giao dịch + thưởng ICS**, dòng tiền đi về **DAO/treasury** của Neutron thay vì
+> distribute kiểu lạm phát. Vì vậy "PoS + mint + distribute" **đúng với Juno/Stargaze/
+> Osmosis nhưng không đúng với Neutron**.
+
+> **Đối chiếu với đồ án:** rollup này **không có** `x/staking`/`x/mint`/`x/distribution` —
+> không validator set, không lạm phát, chỉ **một sequencer**. Phí thu được **không**
+> distribute kiểu Cosmos mà **sweep cuối block về một ví treasury** (xem
+> [fee-economics §6d](fee-economics.md#sweep-phi-cuoi-block) — "Vì sao không dùng
+> `x/distribution`"). An ninh không đến từ stake mà từ **DA + data availability sampling**.
+
 **Số liệu và dẫn chứng.**
 - Mô hình BFT/finality của CometBFT: <https://docs.cometbft.com/v1.0/spec/consensus/>
 - Juno: <https://junonetwork.io> · Neutron: <https://docs.neutron.org> ·
@@ -246,6 +335,49 @@ nơi quyết toán. Khác nhau ở cách chứng minh state đúng:
   ĐỒ ÁN: CosmWasm, không neo L1; data lên Celestia; DA-final ~14s
 ```
 
+**Optimistic vs ZK — cách hoạt động, ưu/nhược, thời gian & tiền bạc.**
+
+*Optimistic (OP Stack, Arbitrum Orbit)* — **mặc định tin sequencer đúng**. Sequencer
+đăng L2 block + state root lên L1 **không kèm bằng chứng**; ai cũng có thể **thách thức**
+trong cửa sổ ~7 ngày bằng **fraud proof**. Nếu chứng minh state sai → L1 revert state root
+đó và **phạt (slash) bond** của proposer.
+
+- **Cách chốt:** hết cửa sổ 7 ngày không ai thách thức → coi là đúng → mới rút được về L1.
+- **Thời gian:** rút "gốc" về L1 mất **~7 ngày**. Muốn nhanh phải qua **cầu thanh khoản
+  (LP bridge)** — nhận ngay nhưng trả phí ~0,05–0,3%.
+- **Tiền:** on-chain **rẻ** (không phải sinh proof đắt); chỉ tốn khi thực sự có tranh chấp.
+- **Ưu:** đơn giản, rẻ khi post; **EVM-equivalent** dễ đạt → tương thích tool Ethereum tốt; trưởng thành nhất.
+- **Nhược:** **finality-về-L1 chậm 7 ngày**; an ninh dựa trên **giả định có ≥1 watcher
+  trung thực** kịp nộp fraud proof trong cửa sổ (giả định *liveness*); fraud proof tương tác, phức tạp.
+
+*ZK (Polygon CDK / zkEVM)* — **chứng minh trước, không cần tin**. Mỗi batch kèm một
+**validity proof** (zk-SNARK/STARK); **L1 verify proof ngay**. Verify đậu → state **final
+lập tức**, không có cửa sổ chờ.
+
+- **Cách chốt:** proof được L1 verify xong là final — không đợi 7 ngày.
+- **Thời gian:** **sinh proof nặng** (phút → hàng giờ tùy hệ & kích thước batch), nhưng
+  sau khi post + verify thì **rút nhanh** (~phút–giờ), không có 7 ngày.
+- **Tiền:** **đắt hơn** — chi phí prover (phần cứng/điện chuyên dụng) + gas verify proof
+  trên L1; bù lại **amortize** trên nhiều tx trong batch.
+- **Ưu:** **finality nhanh**, **trustless** (không cần watcher trung thực), rút nhanh.
+- **Nhược:** chi phí + độ phức tạp prover cao; **zkEVM khó làm** (EVM-equivalence khó); độ trễ sinh proof.
+
+| Trục | Optimistic | ZK |
+|------|-----------|----|
+| Bằng chứng | fraud proof **khi bị thách thức** | validity proof **mọi batch** |
+| Rút về L1 (native) | **~7 ngày** | **~phút–giờ** |
+| Chi phí on-chain | thấp (post trần) | cao hơn (sinh + verify proof) |
+| Giả định an ninh | có watcher trung thực trong cửa sổ | chỉ cần L1 verify đúng (toán học) |
+| Độ khó xây dựng | dễ hơn (EVM-equiv) | khó (zkEVM) |
+
+> **Đồ án khác cả hai:** rollup này **không neo L1**, nên **không có cửa sổ thách thức
+> lẫn không sinh validity proof**. State ban đầu là **soft-final ~2s** (do sequencer sắp
+> thứ tự), rồi **DA-final ~14s** khi data lên Celestia và được verify qua **data
+> availability sampling**. Đánh đổi: an ninh **không** kế thừa từ Ethereum mà đến từ tính
+> **khả dụng dữ liệu (DA)** + chủ quyền tự quản luật — rẻ và nhanh hơn, nhưng mô hình tin
+> cậy khác (không có "L1 tối cao" đứng ra revert/quyết toán). Không rút chậm 7 ngày, cũng
+> không gánh chi phí prover.
+
 **Số liệu và dẫn chứng.**
 - OP Stack — cửa sổ rút/thách thức **7 ngày** (challenge period): tài liệu
   Optimism <https://docs.optimism.io> (mục withdrawals / fault proofs).
@@ -264,34 +396,138 @@ chi phí, không so trực tiếp tính năng EVM với CosmWasm.
 
 ---
 
-## 6. Astria — mạng sequencer dùng chung
+## 6. Mạng sequencer dùng chung (Astria & Espresso)
 
-**Là gì.** Mạng sequencer dùng chung (shared sequencer): cung cấp dịch vụ sắp
-thứ tự giao dịch cho nhiều rollup.
+**Là gì.** **Shared sequencer** (sequencer dùng chung): một mạng độc lập chuyên
+làm **một việc duy nhất là sắp thứ tự** giao dịch cho **nhiều rollup** cùng lúc,
+rồi trả lại luồng đã sắp cho từng rollup **tự thực thi**. Điểm chung của cả nhóm:
+**tách tầng sắp thứ tự (ordering/consensus) khỏi tầng thực thi (execution)** — hai
+việc mà một chain nguyên khối gộp làm một. Astria và Espresso là hai đại diện
+tiêu biểu; khác nhau chủ yếu ở **động cơ đồng thuận** dùng để chốt thứ tự.
 
-**Cách hoạt động.** Các rollup gửi giao dịch tới cùng mạng Astria; mạng đạt đồng
-thuận về **thứ tự**, trả lại luồng tx đã sắp xếp cho từng rollup và công bố lên
-một DA (thường là Celestia). Mỗi rollup **tự thực thi** luồng đó. Nhờ chung một
-thứ tự, mô hình này hỗ trợ giao dịch nguyên tử xuyên rollup.
+Vì sao có mô hình này: nếu mỗi rollup tự chạy **một sequencer đơn** (như ev-node,
+và như đồ án hiện nay) thì (1) người vận hành phải tự đảm bảo tính sống
+(liveness) và chống kiểm duyệt, (2) các rollup **không chia sẻ một thứ tự chung**
+nên không thể có **giao dịch nguyên tử xuyên rollup** (atomic cross-rollup): một
+lệnh vừa mua ở rollup A vừa bán ở rollup B không thể "cùng thành công hoặc cùng
+thất bại". Shared sequencer giải đúng hai điểm đó — đổi lại rollup phải **tin và
+phụ thuộc** vào một mạng bên ngoài cho khâu sống còn là thứ tự giao dịch.
+
+### 6.1 Astria — sequencer là một chain CometBFT, đẩy dữ liệu lên Celestia
+
+**Nguyên lý.** Bản thân **Astria Sequencer là một blockchain riêng chạy
+CometBFT** (đồng thuận Tendermint BFT, tập validator bỏ phiếu, chốt khi đạt trên
+2/3 quyền biểu quyết — instant finality, không reorg ở tầng sequencer). Nhưng
+chain này **cố ý "câm" về thực thi**: nó **không chạy máy ảo, không giữ state của
+rollup**, chỉ nhận các gói tx của rollup như **dữ liệu mờ (opaque bytes)**, đóng
+gói theo `rollup_id` và **cam kết một thứ tự**. Toàn bộ việc "tính toán tx nghĩa
+là gì" để dành cho rollup. Bốn thành phần chạy quanh nó:
+
+- **Composer** — chạy cạnh mỗi rollup, gom tx của rollup, bọc thành *sequence
+  action* gắn `rollup_id`, gửi lên Astria Sequencer.
+- **Sequencer (app CometBFT)** — chạy đồng thuận, tạo block chứa các sequence
+  action đã sắp thứ tự. Đây là nơi phát sinh **soft commitment** (cam kết mềm:
+  thứ tự đã được validator Astria chốt, rất nhanh nhưng chưa lên DA).
+- **DA (Celestia)** — sau khi block sequencer chốt, dữ liệu được **công bố lên
+  Celestia**. Khi blob đã sẵn có trên DA thì thành **firm commitment** (cam kết
+  chắc: dữ liệu đã khả dụng, ai cũng tái dựng được).
+- **Conductor** — chạy cạnh mỗi rollup, **đọc** block đã sắp (soft từ sequencer,
+  firm từ Celestia), lọc đúng `rollup_id` của mình, rồi **đẩy luồng tx đó vào node
+  thực thi của rollup** qua một Execution API (tương tự Engine API của Ethereum).
 
 ```
-  Astria giải TẦNG SẮP THỨ TỰ           Đồ án đóng góp TẦNG THỰC THI
-  ───────────────────────────           ────────────────────────────
-  Rollup A ─┐                            ev-node single sequencer
-  Rollup B ─┼─> Astria (ordering) ─┐         │ (sắp thứ tự)
-  Rollup C ─┘                       │         ▼
-       ▲ trả luồng tx đã sắp        ▼     CosmosExecutor (CosmWasm)
-       └── mỗi rollup TỰ THỰC THI  Celestia (DA)   ← phần đồ án làm
+  Astria — hai mức cam kết (soft → firm)
+  ──────────────────────────────────────
+  Rollup A ─Composer─┐
+  Rollup B ─Composer─┼─► Astria Sequencer ──► soft commit (CometBFT >2/3)
+  Rollup C ─Composer─┘        (CometBFT)            │
+                                                    ▼
+                                             Celestia (DA) ──► firm commit
+                                                    │
+                    Conductor (mỗi rollup) ◄────────┘ đọc block đã sắp
+                          │  lọc theo rollup_id
+                          ▼
+                    Node THỰC THI của rollup  (Astria KHÔNG làm khâu này)
 ```
+
+Nhờ **mọi rollup chia sẻ đúng một chuỗi thứ tự của Astria**, có thể đặt lệnh
+nguyên tử xuyên rollup: các action trong cùng một block sequencer hoặc cùng thành
+công hoặc cùng bị loại. Astria cũng hướng tới **sắp thứ tự trung lập/không kiểm
+duyệt** ở tầng chung thay vì để một sequencer đơn tùy ý.
+
+### 6.2 Espresso — đồng thuận HotShot (họ HotStuff), tối ưu cho tập validator lớn
+
+**Nguyên lý.** Espresso cũng là shared sequencer, nhưng động cơ đồng thuận là
+**HotShot** — một biến thể của **HotStuff** (BFT do leader dẫn dắt, pipelined).
+Espresso chọn HotStuff thay vì Tendermint/CometBFT vì mục tiêu **phi tập trung
+hóa tập validator ở quy mô lớn** (nhiều bên cùng vận hành sequencer) mà vẫn giữ
+thông lượng cao và độ trễ thấp. Điểm cốt lõi của HotStuff giúp điều đó:
+
+- **Giao tiếp tuyến tính O(n)** — mỗi vòng, validator gửi phiếu **về một leader**;
+  leader **gộp phiếu thành một Quorum Certificate (QC)** bằng chữ ký ngưỡng
+  (threshold signature) rồi phát lại. So với Tendermint kiểu gossip O(n²), chi phí
+  truyền thông không bùng nổ khi số validator tăng → **mở rộng được ra tập lớn**.
+- **Pipelined (gối vòng) + xoay leader mỗi view** — các pha của những block liên
+  tiếp chồng lên nhau (một QC vừa "chốt" block này vừa "đề xuất" block sau), nên
+  thông lượng cao; leader đổi mỗi view nên không một node nào giữ đặc quyền lâu.
+- **Optimistic responsiveness** — mạng chạy **theo tốc độ mạng thật** (độ trễ
+  thực tế) chứ không phải chờ hết một timeout cố định như Tendermint; khi mạng
+  khỏe, block chốt nhanh bám sát độ trễ vật lý.
+
+Espresso còn **tách riêng đồng thuận và sẵn sàng dữ liệu**: HotShot lo *thứ tự +
+finality*, còn một tầng DA riêng (thiết kế nhiều lớp, Espresso gọi là *Tiramisu*)
+lo *phát tán dữ liệu*. Nó cấp cho rollup một **HotShot confirmation** — một xác
+nhận finality nhanh (cỡ vài giây) mà rollup có thể tin để coi block là chắc,
+**không lo sequencer tự đảo (reorg)**. Espresso được tích hợp cho các rollup hệ
+Ethereum (OP Stack, Arbitrum Orbit…) như một "lớp xác nhận" đặt trước tầng quyết
+toán chậm trên L1.
+
+```
+  Espresso — HotShot (HotStuff) tách consensus ↔ DA
+  ─────────────────────────────────────────────────
+  Rollup A ─┐        HotShot (leader gộp phiếu → QC, O(n), pipelined)
+  Rollup B ─┼─► ordering ─► HotShot confirmation (finality nhanh, ~giây)
+  Rollup C ─┘                 │
+                              ├─► tầng DA riêng (Tiramisu) phát tán dữ liệu
+                              ▼
+                    node THỰC THI của mỗi rollup (Espresso KHÔNG làm)
+```
+
+### 6.3 Vì sao khác động cơ: HotStuff (Espresso) vs CometBFT/Tendermint (Astria)
+
+| Trục | CometBFT/Tendermint (Astria) | HotStuff/HotShot (Espresso) |
+|------|------------------------------|-----------------------------|
+| Kiểu đồng thuận | BFT gossip, xoay proposer theo vòng | BFT do **leader** dẫn, xoay leader **mỗi view** |
+| Chi phí truyền thông | ~**O(n²)** (validator nói với nhau) | ~**O(n)** (leader gộp phiếu → QC bằng threshold sig) |
+| Mở rộng tập validator | tốt ở quy mô vừa (hàng chục–hơn trăm) | thiết kế cho **tập lớn hơn**, phi tập trung sâu |
+| Đáp ứng theo mạng | tiến theo **timeout cố định** (Δ) | **optimistic responsiveness** — chạy theo tốc độ mạng thật |
+| Finality | tức thì 1 block (>2/3) | tức thì theo QC, pipelined |
+| Trong sản phẩm | Astria Sequencer là **một chain CometBFT** | Espresso dùng **HotShot** làm động cơ |
+
+> **Tinh thần chung của cả hai.** Đều là *lớp sắp thứ tự dùng chung* — chỉ chốt
+> **thứ tự** rồi đẩy dữ liệu xuống một DA, còn **thực thi giao/lệnh là việc của
+> từng rollup**. Khác biệt kỹ thuật nằm ở động cơ đồng thuận (CometBFT vs
+> HotStuff) và cách tổ chức DA, dẫn tới khác nhau về mức phi tập trung và đặc tính
+> độ trễ, nhưng vai trò trong ngăn xếp là như nhau.
 
 **Số liệu và dẫn chứng.**
-- Astria: <https://astria.org> · Tài liệu: <https://docs.astria.org>
-- Trục đối chiếu: Astria làm việc ở tầng sequencer, đồ án ở tầng thực thi — bổ
-  trợ chứ không trùng. Hướng phát triển của đồ án (multi-sequencer) là nơi hai
-  ý tưởng gặp nhau.
+- Astria: <https://astria.org> · Tài liệu: <https://docs.astria.org> — kiến trúc
+  Composer / Sequencer (CometBFT) / Conductor, hai mức *soft* và *firm commitment*,
+  công bố dữ liệu lên Celestia.
+- Espresso: <https://docs.espressosys.com> — đồng thuận **HotShot**; giấy/đặc tả
+  HotStuff gốc: <https://arxiv.org/abs/1803.05069>.
+- Đặc tả CometBFT (để đối chiếu động cơ của Astria):
+  <https://docs.cometbft.com/v1.0/spec/consensus/>.
+- Trục đối chiếu: cả Astria lẫn Espresso làm việc ở **tầng sequencer**, đồ án ở
+  **tầng thực thi** — bổ trợ chứ không trùng. Hướng phát triển multi-sequencer của
+  đồ án là nơi hai ý tưởng gặp nhau.
 
-**So với đồ án.** Astria không cung cấp lớp thực thi. Đồ án hiện dùng single
-sequencer của ev-node và đóng góp ở lớp thực thi CosmWasm.
+**So với đồ án.** Cả hai **không cung cấp lớp thực thi** — đúng phần đồ án đóng
+góp (CosmosExecutor + CosmWasm). Đồ án hiện dùng **single sequencer** của ev-node
+(một bên sắp thứ tự), nên chưa có finality dùng chung hay nguyên tử xuyên rollup;
+đổi lại vận hành đơn giản, không phụ thuộc một mạng đồng thuận ngoài. Nếu sau này
+gắn multi-sequencer, ev-node về nguyên tắc có thể đặt bên dưới một shared sequencer
+kiểu Astria/Espresso, còn tầng thực thi CosmWasm của đồ án giữ nguyên.
 
 ---
 
@@ -391,7 +627,8 @@ wasmd — `LimitSimulationGasDecorator` (chặn DoS khi simulate) và `CountTXDe
 | evstack/wasmd | Fork wasmd thuần, CometBFT + x/wasm | cùng x/wasm; SDK 0.50.10 | Cùng tầng thực thi, khác consensus/DA |
 | OP Stack/Arbitrum Orbit | Rollup EVM optimistic neo Ethereum | cửa sổ thách thức ~7 ngày | CosmWasm; DA Celestia; không neo L1 |
 | Polygon CDK | Rollup EVM zk neo Ethereum | validity proof, không cửa sổ chờ | CosmWasm; DA Celestia; không neo L1 |
-| Astria | Sequencer dùng chung (chỉ ordering) | tầng sắp thứ tự | Đồ án đóng góp tầng thực thi |
+| Astria | Sequencer dùng chung; **chain CometBFT** chỉ ordering → Celestia | soft/firm commitment | Đồ án đóng góp tầng thực thi |
+| Espresso | Sequencer dùng chung; đồng thuận **HotShot (HotStuff)** | O(n), tập validator lớn | Đồ án đóng góp tầng thực thi |
 | Celestia (đồ án dùng) | DA + DAS theo namespace | block ~6s | (mốc) |
 | EigenDA | Restaking + chứng thực operator | an ninh từ ETH restake | DA thay thế tiềm năng |
 | Avail | KZG + DAS | light client lấy mẫu | DA thay thế tiềm năng |

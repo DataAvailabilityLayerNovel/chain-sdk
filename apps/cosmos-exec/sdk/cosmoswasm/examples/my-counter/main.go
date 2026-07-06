@@ -327,6 +327,36 @@ func coverageDemo(ctx context.Context, execURL, contractAddr string, signer *cos
 	fmt.Printf("  blob-commit tx: %d bytes, batch-root tx: %d bytes (built, not submitted)\n",
 		len(blobTx), len(batchTx))
 
+	// 5f. Dev-facing reads (bọc thêm): ước lượng chi phí, đọc block, đếm mempool,
+	// simulate gas. Đều an toàn — không phát sinh giao dịch.
+	obs := cosmoswasm.NewClient(execURL)
+	if est, eerr := obs.EstimateCost(ctx, cosmoswasm.EstimateRequest{Bytes: 1024, Gas: 200_000}); eerr == nil {
+		fmt.Printf("  estimate(1KB, 200k gas): DA=%s%s gas=%s%s\n",
+			est.EstDAAmount, est.EstDADenom, est.EstGasAmount, est.EstGasDenom)
+	}
+	if blk, found, berr := obs.GetLatestBlock(ctx); berr == nil && found {
+		fmt.Printf("  latest block: height=%d num_txs=%d\n", blk.Height, blk.NumTxs)
+		if byH, herr := obs.GetBlockByHeight(ctx, blk.Height); herr == nil {
+			fmt.Printf("  block#%d app_hash=%s…\n", byH.Height, head(byH.AppHash, 12))
+		}
+	}
+	if n, perr := obs.GetPendingTxCount(ctx); perr == nil {
+		fmt.Printf("  pending tx in mempool: %d\n", n)
+	}
+	// SimulateTx cần tx bytes: dựng một execute (increment) trên contract thật để
+	// đo gas. Ở chế độ enforce chữ ký, tx chưa ký có thể bị từ chối → bỏ qua.
+	if simTx, serr := cosmoswasm.BuildExecuteTx(cosmoswasm.ExecuteTxRequest{
+		Contract: contractAddr,
+		Msg:      map[string]any{"increment": struct{}{}},
+	}); serr == nil {
+		if sim, simErr := obs.SimulateTx(ctx, simTx); simErr == nil {
+			fmt.Printf("  simulate increment: gas_used=%d gas_limit=%d fee=%s%s\n",
+				sim.GasUsed, sim.GasLimit, sim.FeeAmount, sim.FeeDenom)
+		} else {
+			fmt.Printf("  simulate skipped: %v\n", friendly(simErr))
+		}
+	}
+
 	// 5e. Faucet helpers. TreasuryAddressFromHex is offline; BuildSignedBankSend
 	// signs offline too. Only submitted when FAUCET_TO is set and we have a key.
 	if privHex == "" || chainID == "" {

@@ -24,10 +24,13 @@
 //   - Client.SubmitTxBytes, Client.SubmitTxBase64
 //   - Client.GetTxResult, Client.WaitTxResult
 //   - Client.GetTxFinality, Client.WaitTxFinality              — soft vs DA finality
+//   - Client.SimulateTx, Client.EstimateCost                   — gas thật + ước lượng chi phí trước khi ký
 //   - Client.QuerySmart, Client.QuerySmartRaw
+//   - Client.GetLatestBlock, Client.GetBlockByHeight, Client.GetPendingTxCount — đọc block & mempool
 //   - [NewBlobClient], BlobClient.SubmitBlob, BlobClient.RetrieveBlob — blob-first DA (Celestia)
 //   - BlobClient.SubmitBatch, BlobClient.VerifyBlob            — batch upload + integrity check
 //   - [BuildBlobCommitTx], [BuildBatchRootTx]                  — record commitment/root on-chain
+//   - [StoreBlobAndRecord], [StoreBatchAndRecord]              — gộp upload DA + ghi on-chain (1 call)
 //   - [SDKError], sentinel errors ([ErrNotReachable], etc.)    — structured errors
 //
 // ## Tier 2 — Power-user utilities (stable, use when needed)

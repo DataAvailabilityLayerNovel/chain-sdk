@@ -61,9 +61,11 @@ Người vận hành chain: start sequencer + full node, cấu hình DA, monitor
 | [README.md](README.md) | (file này) Tổng quan SDK, 3 nhóm user, function map, index |
 | [getting-started.md](getting-started.md) | End-to-end: compile `.wasm` → start chain → deploy contract → interact qua SDK |
 | [api-reference.md](api-reference.md) | Mọi public method: tham số, response, error, ví dụ code |
+| [swagger-api.md](swagger-api.md) | Endpoint HTTP có trong Swagger: request/response + ví dụ `curl` từng API |
 | [architecture.md](architecture.md) | Cấu trúc project: từng folder/file, data flow, các interface chính |
 | [configuration.md](configuration.md) | Toàn bộ field config SDK + server, env var, profile dev/staging/prod |
 | [error-handling.md](error-handling.md) | `SDKError`, sentinel error, retry policy, map error → hành động app |
+| [error-reference.md](error-reference.md) | Tổng hợp **mọi** lỗi/log có thể phát ra (khởi động, middleware, handler, executor, ante, faucet) + WARN của evcosmos/ev-node + nguyên nhân + cách fix |
 | [migration.md](migration.md) | Thay đổi giữa các version, tách internal, lộ trình v1.0 |
 
 ### Blob-first & DA
@@ -79,8 +81,11 @@ Người vận hành chain: start sequencer + full node, cấu hình DA, monitor
 | File | Nội dung |
 |------|----------|
 | [chain-flow.md](chain-flow.md) | Vòng đời tx, block production, submit DA, node sync, P2P broadcast |
+| [block-architecture.md](block-architecture.md) | Kiến trúc gói `block` ev-node: Executor/Syncer/Submitter/Cache/Replayer, forced inclusion, metrics, state machine |
+| [da-sequencing.md](da-sequencing.md) | Tầng DA (type, namespace, client interface, submit/retrieve) + sequencing (single vs based, batch, GetNextBatch, async retriever) |
 | [node-operations.md](node-operations.md) | Cách start sequencer + full node, 2 tiến trình/node, ports, data on-chain vs off-chain |
 | [production-guide.md](production-guide.md) | Tune timeout/retry, auth, rate limiting, monitoring, SLO |
+| [metrics-prometheus.md](metrics-prometheus.md) | Endpoint `/metrics` + `/metrics.json`, danh sách metric, cờ `MetricsEnabled`, scrape config + PromQL |
 | [profiles-and-security.md](profiles-and-security.md) | Profile `dev`/`prod` của `cosmos-exec-grpc`, passphrase signer, hardening |
 | [sequencer-security.md](sequencer-security.md) | Vì sao không cần validator set; single vs based sequencer; forced inclusion; chống kiểm duyệt |
 | [troubleshooting.md](troubleshooting.md) | Lỗi thường gặp, lệnh curl chẩn đoán, checklist debug |
@@ -136,6 +141,16 @@ Toàn bộ public API hiện hành (sau refactor `ea844067`), gom theo 3 tier nh
 | `Client.GetTxFinality(ctx, hash)` | Trả `FinalityLevel` (`Unknown`/`Soft`/`DA`) + result |
 | `Client.WaitTxFinality(ctx, hash, want, interval)` | Poll tới khi đạt mức finality `want` (vd `FinalityDA`) |
 | `Client.FetchAccount(ctx, addr)` | Lấy `account_number` + `sequence` để ký tx |
+| `Client.SimulateTx(ctx, tx)` | Chạy thử tx → gas thật + `gas_limit` + `fee` để ký (`/tx/simulate`) |
+| `Client.EstimateCost(ctx, EstimateRequest)` | Ước lượng chi phí DA + gas, không chạy tx (`/tx/estimate`) |
+
+**Block & mempool**
+
+| Function | Mô tả |
+|----------|------|
+| `Client.GetLatestBlock(ctx)` | Block mới nhất (`*BlockInfo`, `found`) |
+| `Client.GetBlockByHeight(ctx, height)` | Block theo chiều cao |
+| `Client.GetPendingTxCount(ctx)` | Số tx đang chờ trong mempool |
 
 **Query (read-only)**
 
@@ -161,6 +176,8 @@ Toàn bộ public API hiện hành (sau refactor `ea844067`), gom theo 3 tier nh
 |----------|-------|
 | `BuildBlobCommitTx(BlobCommitTxRequest)` | Tx ghi một blob commitment lên contract |
 | `BuildBatchRootTx(BatchRootTxRequest)` | Tx ghi Merkle root của một batch |
+| `StoreBlobAndRecord(ctx, bc, client, signer, contract, data, buildMsg)` | Gộp 1 call: upload blob lên DA + ghi commitment on-chain (message do dev dựng) |
+| `StoreBatchAndRecord(ctx, bc, client, signer, contract, blobs, buildMsg)` | Như trên cho N blob → 1 Merkle root |
 
 **Errors**
 
@@ -214,7 +231,7 @@ Chi tiết: [error-handling.md](error-handling.md).
 
 **Transport & response types**
 
-`ExecutorClient` (interface HTTP/gRPC); `SubmitTxResponse`, `GetTxResultResponse`, `TxExecutionResult`, `BlobSubmitResponse`, `BlobRetrieveResponse`, `BlobBatchResponse`, `QuerySmartResponse`, `AccountInfo`, `NodeStatus`.
+`ExecutorClient` (interface HTTP/gRPC); `SubmitTxResponse`, `GetTxResultResponse`, `TxExecutionResult`, `BlobSubmitResponse`, `BlobRetrieveResponse`, `BlobBatchResponse`, `QuerySmartResponse`, `AccountInfo`, `NodeStatus`, `SimulateResponse`, `CostBreakdown`, `EstimateRequest`, `BlockInfo`, `Coin`.
 
 ### Tier 3 — Dev tooling (local integration test)
 
@@ -270,7 +287,7 @@ Refactor `ea844067` đã thay tầng blob/DA bằng `BlobClient` + Merkle helper
 | `DAClient` (interface), `DABridge`, `NewDABridge`, `DANamespaceConfig` | `BlobClient` (`NewBlobClient` + `SubmitBlob`/`RetrieveBlob`/`SubmitBatch`) |
 | `BatchBuilder`, `NewBatchBuilder`, `DefaultBatchBuilderConfig` | `BlobClient.SubmitBatch` (gom blob thủ công + 1 lần submit) |
 | `CommitRoot`, `CommitCritical` | `SubmitBatch` + `BuildBatchRootTx` (2 bước rõ ràng) |
-| `EstimateCost`, `DefaultEstimateCostRequest` | (đã gỡ) — xem [fee-economics.md](fee-economics.md) để tự tính |
+| `EstimateCost` (chữ ký cũ), `DefaultEstimateCostRequest` | Thay bằng `Client.EstimateCost(ctx, EstimateRequest)` — bọc `/tx/estimate` (xem [api-reference.md](api-reference.md#m-estimatecost)) |
 | `GetProof(commitments, i)` | `BuildMerkleProof(commitments, index)` |
 | `RetrieveBlobData(commitment)` | `RetrieveBlob(ctx, height, commitmentHex)` (cần thêm `height`) |
 | `NewMockClient`, `MockExecutorClient`, `NewMockDAClient`, `MockDAClient` | (đã gỡ) — test trực tiếp qua `httptest` / `StartDALChain` |

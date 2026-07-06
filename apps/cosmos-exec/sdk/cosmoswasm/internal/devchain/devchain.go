@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -106,12 +107,39 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Stop kills the running chain process.
+// Stop gracefully shuts the chain down.
+//
+// VI: gửi SIGINT để runner tự cancel context và tear down mọi child process
+// (sequencer/full node/exec), chờ tối đa 10s rồi mới ép Kill nếu runner bướng.
+// KHÔNG dùng Kill() thẳng: SIGKILL không bắt được → runner chết tức thì, child
+// thành mồ côi và chain vẫn chạy.
 func (p *Process) Stop() error {
 	if p == nil || p.Cmd == nil || p.Cmd.Process == nil {
 		return nil
 	}
-	return p.Cmd.Process.Kill()
+
+	// PID của runner = PGID của group (vì Setpgid → child là group leader). Gửi
+	// signal với PID ÂM = signal cả group: chạm trực tiếp runner (bỏ qua lớp
+	// `go run` không forward signal) lẫn sequencer/full node/exec.
+	pgid := p.Cmd.Process.Pid
+
+	if err := syscall.Kill(-pgid, syscall.SIGINT); err != nil {
+		// Group đã chết / không gửi được → ép kill cho chắc rồi thôi.
+		_ = p.Cmd.Process.Kill()
+		return nil
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- p.Cmd.Wait() }()
+
+	select {
+	case <-done:
+		// Runner đã thoát; exit non-zero do signal là bình thường → coi như OK.
+		return nil
+	case <-time.After(10 * time.Second):
+		_ = syscall.Kill(-pgid, syscall.SIGKILL) // bướng → ép kill cả group.
+		return nil
+	}
 }
 
 // Start launches a local DAL chain and waits for it to become healthy.
@@ -121,6 +149,17 @@ func Start(ctx context.Context, cfg Config) (*Process, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, "go", BuildRunnerArgs(cfg)...)
+	// Đặt runner + toàn bộ con cháu vào MỘT process group riêng. Lý do: runner
+	// chạy qua `go run`, mà `go run` KHÔNG forward signal xuống binary thật nó
+	// compile ra — signal thẳng vào cmd.Process (chính là tiến trình `go run`)
+	// sẽ không tới runner → runner cùng sequencer/full node bị mồ côi. Có group
+	// riêng, ta signal cả group (PID âm) để chạm trực tiếp runner + mọi child.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Khi ctx bị hủy (vd Ctrl+C lúc đang boot): gửi SIGINT cho CẢ GROUP thay vì
+	// SIGKILL mặc định. Runner bắt SIGINT → cancel context của nó → tear down
+	// child. WaitDelay cho 10s dọn dẹp trước khi Go ép kill.
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT) }
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Dir = cfg.ProjectRoot
 	cmd.Env = append(os.Environ(),
 		"DA_BRIDGE_RPC="+cfg.DABridgeRPC,

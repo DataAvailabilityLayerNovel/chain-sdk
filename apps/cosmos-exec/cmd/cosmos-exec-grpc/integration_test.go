@@ -30,7 +30,7 @@ import (
 // 5. Verify block is recorded
 func TestIntegration_SubmitExecuteQuery(t *testing.T) {
 	ctx := context.Background()
-	exec := executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	exec := executor.New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 
 	sender := sdk.AccAddress(bytes.Repeat([]byte{0x11}, 20))
 

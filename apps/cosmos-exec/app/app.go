@@ -93,7 +93,10 @@ type App struct {
 //   - chainID ...string: tham số biến đổi (0 hoặc nhiều) — chain id tuỳ chọn.
 //
 // Trả về: con trỏ *App đã dựng đầy đủ keeper/module.
-func New(logger log.Logger, database dbm.DB, chainID ...string) *App {
+// New dựng App. homeDir = thư mục home của tiến trình (vd cfg.Home); cache WASM
+// (bytecode + module đã compile) sẽ nằm dưới <homeDir>/wasm thay vì rải theo CWD.
+// homeDir="" → fallback đường dẫn tương đối cũ ".cosmos-exec-wasm" (giữ tương thích).
+func New(logger log.Logger, database dbm.DB, homeDir string, chainID ...string) *App {
 	// SDK 0.50+ requires explicit address codecs on the InterfaceRegistry,
 	// otherwise tx signing/decoding fails with
 	// "InterfaceRegistry requires a proper address codec implementation".
@@ -258,7 +261,12 @@ func New(logger log.Logger, database dbm.DB, chainID ...string) *App {
 	)
 
 	wasmConfig := wasmtypes.DefaultWasmConfig() // cấu hình wasm mặc định.
-	homePath := ".cosmos-exec-wasm"             // thư mục lưu mã wasm đã build.
+	// homePath: thư mục cha của cache WASM (wasmkeeper tự tạo subdir "wasm" bên trong).
+	// Đặt dưới home của tiến trình → cache nằm <homeDir>/wasm, không còn rải theo CWD.
+	homePath := homeDir
+	if homePath == "" {
+		homePath = ".cosmos-exec-wasm" // fallback tương thích khi không truyền home.
+	}
 	// availableCapabilities: danh sách "năng lực" wasm bật, nối bằng dấu phẩy.
 	availableCapabilities := strings.Join([]string{
 		"iterator",

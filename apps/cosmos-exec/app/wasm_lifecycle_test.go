@@ -15,7 +15,7 @@ import (
 )
 
 func TestReflectContractLifecycle(t *testing.T) {
-	application := New(log.NewNopLogger(), dbm.NewMemDB())
+	application := New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir())
 	application.InitChainWithDefaultGenesis("")
 
 	ctx := application.BaseApp.NewContext(false).WithBlockHeight(1).WithBlockTime(time.Now())

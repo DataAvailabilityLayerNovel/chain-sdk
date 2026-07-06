@@ -10,24 +10,26 @@ Celestia sử dụng mempool ưu tiên theo giá gas tiêu chuẩn. Điều này
 
 ## Mục lục
 
-- 1. Mô hình chi phí thật của rollup
-- 1b. Hàm ước lượng phí: `/tx/estimate` vs `/tx/simulate`
-- 1c. Hóa đơn Celestia THẬT được tính thế nào (API · minfee · số đo)
-- 1d. Tính fee thực thi đầu-cuối: gas_limit, gas_price → fee (ví dụ số)
-- 2. Ai trả gì
-- 3. Tổng chi phí vận hành rollup / tháng
-- 4. Điểm hòa vốn
-- 5. Đòn bẩy giảm phí
-- 6. Cách bật fee thật
-- 6b. Faucet / cấp vốn (A+B đã implement)
-- 6c. Tích hợp Web/UI (nút "Get test tokens")
-- 6d. Sweep phí cuối block về treasury
-- 7. Checklist production có fee
-- 8. Kết luận
-- Tham chiếu code
+- [1. Mô hình chi phí thật của rollup](#muc-1)
+- [1b. Hàm ước lượng phí: `/tx/estimate` vs `/tx/simulate`](#muc-1b)
+- [1c. Hóa đơn Celestia THẬT được tính thế nào (API · minfee · số đo)](#muc-1c)
+- [1d. Tính fee thực thi đầu-cuối: gas_limit, gas_price → fee (ví dụ số)](#muc-1d)
+- [2. Ai trả gì](#muc-2)
+- [3. Tổng chi phí vận hành rollup / tháng](#muc-3)
+- [4. Điểm hòa vốn](#muc-4)
+- [5. Đòn bẩy giảm phí](#muc-5)
+- [6. Cách bật fee thật](#muc-6)
+- [6b. Faucet / cấp vốn (A+B đã implement)](#muc-6b)
+- [6c. Tích hợp Web/UI (nút "Get test tokens")](#muc-6c)
+- [6d. Sweep phí cuối block về treasury](#sweep-phi-cuoi-block)
+- [6e. AutoCreateAccount — tự tạo tài khoản khi ký lần đầu](#muc-6e)
+- [7. Checklist production có fee](#muc-7)
+- [8. Kết luận](#muc-8)
+- [Tham chiếu code](#tham-chieu-code)
 
 ---
 
+<a id="muc-1"></a>
 ## 1. Mô hình chi phí thật của rollup
 
 Stack này đã có sẵn cost model thật trong `cmd/cosmos-exec-grpc/cost.go`. Mỗi tx có **hai thành phần phí**:
@@ -62,6 +64,7 @@ Hiện chain chạy **ante 0-fee** (`NewPermissionlessAnteHandler`, `apps/cosmos
 
 ---
 
+<a id="muc-1b"></a>
 ## 1b. Hàm ước lượng phí: `/tx/estimate` vs `/tx/simulate` (cách tính chi tiết)
 
 Có **hai** endpoint ước lượng, khác nhau ở chỗ *đo thật* hay *tính theo công thức*:
@@ -154,6 +157,7 @@ ký tx → /tx/submit → /tx/result (đợi kết quả)
 
 ---
 
+<a id="muc-1c"></a>
 ## 1c. Hóa đơn Celestia THẬT được tính thế nào (API + công thức + số đo)
 
 Mục 1 dùng `DA_cost = bytes × TIA_PER_BYTE` — đó là **mô hình tuyến tính per-tx do
@@ -257,6 +261,105 @@ Con số biên `5,0·10⁻⁸` khớp công thức lý thuyết ở mục C: `51
 > §10 dùng mốc hiện hành 0,005**; các con số 0,004 ở đây là bản ghi lịch sử của run
 > 593k, giữ nguyên để truy vết.
 
+### D2. Script `measure_da_fees.mjs` đo bằng cách nào (phương pháp)
+
+> Script sống ở **repo FE `my-dapp-web`**: `scripts/measure_da_fees.mjs`. Nó không
+> phụ thuộc ev-node — chỉ cần một CometBFT RPC của celestia-app. Chạy:
+> ```bash
+> node scripts/measure_da_fees.mjs <RPC> <startHeight> <endHeight>
+> node scripts/measure_da_fees.mjs http://131.153.224.169:26757 592829 593129
+> ```
+
+**Vì sao phải quét on-chain.** API DA `Submit` chỉ trả `Height` + `BlobSize`, **không**
+trả phí. Phí thật là `fee.amount` (denom `utia`) của giao dịch **`MsgPayForBlobs` (PFB)**
+mà celestia-app ghi lên chuỗi. Nên cách duy nhất lấy số đúng là **quét block DA, tìm PFB,
+decode fee**. Trên mạng DA private này rollup là bên **duy nhất** submit blob → mọi PFB tìm
+thấy đều là submission của rollup.
+
+**Luồng tổng quát** (`scanHeight` chạy song song `CONCURRENCY=12` height):
+
+```
+mỗi height:  GET /block?height=H            → block.data.txs[] (base64)
+             GET /block_results?height=H    → gas_used[] (optional)
+  mỗi tx:    unwrapTx(bytes)                 → gỡ vỏ Celestia
+             TxRaw.decode → TxBody + AuthInfo
+             lọc message typeUrl == /celestia.blob.v1.MsgPayForBlobs
+             fee   = Σ AuthInfo.fee.amount[denom=utia]
+             bytes = Σ MsgPayForBlobs.blob_sizes   (field 3)
+             hash  = SHA256(outer bytes) hoa   (= tx hash CometBFT)
+```
+
+**Bước then chốt 1 — gỡ lớp bọc Celestia.** Tx blob trên celestia-app **không** phải
+`TxRaw` cosmos trần: nó bị bọc trong `BlobTx` (khi broadcast) hoặc `IndexWrapper` (khi
+đã vào block), nhận diện bằng một `type_id` = chuỗi `"BLOB"`/`"INDX"` nằm ở **field 3**;
+tx cosmos thật nằm ở **field 1**. cosmjs-types không biết hai vỏ này, nên script **tự đọc
+protobuf thô** để bóc:
+
+```js
+// Peel Celestia's IndexWrapper{tx=1,...,type_id=3="INDX"} / BlobTx(type_id="BLOB").
+function unwrapTx(bytes) {
+  const typeId = getLenField(bytes, 3);          // đọc field 3
+  if (typeId) {
+    const id = Buffer.from(typeId).toString("utf8");
+    if (id === "INDX" || id === "BLOB") {
+      const inner = getLenField(bytes, 1);        // field 1 = tx cosmos bên trong
+      if (inner) return inner;
+    }
+  }
+  return bytes;                                    // không phải vỏ → trả nguyên
+}
+```
+
+`getLenField` là bộ đọc protobuf tối giản: duyệt từng field theo cặp `(tag, wire type)`,
+với wire type 2 (length-delimited) thì đọc độ dài rồi cắt đúng field cần; các wire type
+khác (varint/64-bit/32-bit) thì skip qua. Nhờ vậy không cần schema của `BlobTx`.
+
+**Bước then chốt 2 — decode fee.** Sau khi có tx cosmos, dùng cosmjs-types decode chuẩn
+rồi cộng các coin `utia` trong `fee.amount`:
+
+```js
+const raw  = TxRaw.decode(inner);
+const body = TxBody.decode(raw.bodyBytes);
+const auth = AuthInfo.decode(raw.authInfoBytes);
+if (body.messages.every(m => m.typeUrl !== PFB)) return;   // không phải PFB → bỏ
+let utia = 0n;
+for (const c of auth.fee?.amount ?? []) if (c.denom === "utia") utia += BigInt(c.amount);
+```
+
+**Bước then chốt 3 — bytes blob CHÍNH XÁC.** Kích thước blob thật = tổng
+`MsgPayForBlobs.blob_sizes` (repeated `uint32`, **field 3** của message), chứ không phải
+kích thước tx. `blob_sizes` có thể mã hoá **packed** hoặc **non-packed**, nên script xử lý
+cả hai:
+
+```js
+// đọc repeated uint32 field, cả packed lẫn non-packed
+let blobBytes = 0;
+for (const m of pfbMsgs) for (const s of getRepeatedUint32(m.value, 3)) blobBytes += s;
+```
+
+Đây là lý do phải parse proto thô lần nữa: cosmjs-types không có type của
+`celestia.blob.v1.MsgPayForBlobs`, ta chỉ cần đúng 1 field nên tự đọc rẻ hơn generate type.
+
+**Thống kê cuối.** Sau khi gom mọi PFB thành các dòng `{height, hash, utia, blobBytes,
+gas_limit, gas_used}`, script in bảng per-PFB rồi tính:
+
+- **mean / stdev / min–max** của `fee/PFB`, tổng phí, tổng byte.
+- **Rate hiệu dụng** = `Σfee / Σbytes` — gánh cả phí cố định nên **nói quá** với blob lớn.
+- **Hồi quy least-squares** `fee ≈ fixed + marginal·bytes` để **tách** phí cố định mỗi PFB
+  khỏi chi phí biên mỗi byte — chính là hai con số `~301 utia` (fixed) và `~0,05 utia/byte`
+  (marginal) ở bảng [mục D](#d-số-đo-thật-trên-chuỗi-đo-bằng-scriptsmeasure_da_feesmjs):
+
+```js
+const marginal = (n*sxy - sx*sum) / (n*sxx - sx*sx); // utia/byte
+const fixed    = (sum - marginal*sx) / n;            // utia/PFB
+// → 1 MiB: fixed + marginal*1048576  (DÙNG số này cho data lớn, không dùng rate hiệu dụng)
+```
+
+> Vì sao cần cả hai rate: blob nhỏ bị phí cố định áp đảo (blob 379B ~0,84 utia/byte) còn
+> blob lớn tiệm cận `marginal`. Rate hiệu dụng đúng cho "trung bình tải hiện tại"; hồi quy
+> đúng cho "chi phí thêm khi tăng 1 byte". Đây là cơ sở chọn `COSMOS_EXEC_TIA_PER_BYTE`
+> ở [mục E](#e-vì-sao-tia_per_byte--bytes-chỉ-là-xấp-xỉ--và-đặt-bao-nhiêu) ngay dưới.
+
 ### E. Vì sao `TIA_PER_BYTE × bytes` chỉ là xấp xỉ — và đặt bao nhiêu
 
 - **Phí cố định áp đảo blob nhỏ:** đo được fixed ~301 utia → blob 379B tốn 320 utia
@@ -279,6 +382,7 @@ Con số biên `5,0·10⁻⁸` khớp công thức lý thuyết ở mục C: `51
 
 ---
 
+<a id="muc-1d"></a>
 ## 1d. Tính fee thực thi đầu-cuối: `gas_limit`, `gas_price` → `fee` (ví dụ số)
 
 Mục 1 cho công thức tổng `total_cost = DA_cost + gas_cost`. Mục này đi sâu vào **phần
@@ -372,6 +476,7 @@ trực tiếp — quy về USD bằng giá token tương ứng khi cần (xem
 
 ---
 
+<a id="muc-2"></a>
 ## 2. Ai trả gì
 
 | Khoản | Cosmos chain thường (sovereign) | Rollup ev-node (bật fee) |
@@ -413,6 +518,7 @@ Một dòng: **chain thường "in tiền" để mua an ninh — bạn trả b�
 
 ---
 
+<a id="muc-3"></a>
 ## 3. Tổng chi phí vận hành rollup / tháng
 
 Operator trả Celestia theo **byte blob mỗi block**. Mỗi block publish ít nhất header blob (+ data blob nếu có tx):
@@ -430,6 +536,7 @@ Nhận xét quan trọng:
 
 ---
 
+<a id="muc-4"></a>
 ## 4. Điểm hòa vốn (vì sao "không phải lúc nào cũng rẻ hơn")
 
 | Vùng | Ai thắng | Lý do |
@@ -456,6 +563,7 @@ Nhận xét quan trọng:
 
 ---
 
+<a id="muc-5"></a>
 ## 5. Đòn bẩy giảm phí (đều có sẵn trong stack)
 
 | Lever | Cờ / Env | Tác dụng |
@@ -473,6 +581,7 @@ Lưu ý ràng buộc: `lazy_block_interval` phải **lớn hơn** `block_time`, 
 
 ---
 
+<a id="muc-6"></a>
 ## 6. Cách bật fee thật (đầy đủ, đúng với code hiện tại)
 
 > ⚠️ Bật fee ≠ "đổi một dòng". Có **4 việc bắt buộc**. Bỏ sót bất kỳ việc nào → hoặc fee không được enforce, hoặc **mọi tx fail `insufficient funds`** và chain coi như chết.
@@ -521,6 +630,7 @@ Nên phải có đường bơm token vào account trước khi nó ký tx tốn 
 
 ---
 
+<a id="muc-6b"></a>
 ## 6b. Faucet / cấp vốn — A+B đã được implement
 
 > **Trạng thái:** cách **A (genesis balances)** + **B (faucet endpoint)** đã có sẵn trong code, **opt-in qua env**. Mặc định không set env → giữ nguyên hành vi cũ (zero-balance, không faucet, fee = 0 — đúng thiết kế [auto-account-creation.md](auto-account-creation.md)). Cách **C (airdrop-on-create)** vẫn chỉ là phương án tương lai (xem cuối mục).
@@ -567,6 +677,7 @@ Khuyến nghị: **A (treasury) + B (faucet phát lẻ)** — đã sẵn sàng, 
 
 ---
 
+<a id="muc-6c"></a>
 ## 6c. Tích hợp Web/UI (nút "Get test tokens")
 
 Faucet đã được nối vào explorer web (`my-dapp-web`) — người dùng không cần `curl`:
@@ -646,6 +757,54 @@ Treasury có thể là EOA, multisig, hay địa chỉ contract CosmWasm — cha
 
 ---
 
+<a id="muc-6e"></a>
+## 6e. AutoCreateAccount — tự tạo tài khoản khi ký lần đầu
+
+> **Trạng thái:** là một decorator trong chuỗi ante (`AutoCreateAccountDecorator`, [`app/ante.go:188-248`](../../../app/ante.go#L188-L248)), chạy ngay đầu chuỗi — **trước** các bước kiểm tra pubkey/chữ ký. Chỉ thực sự kích hoạt khi ante chain được bật (`COSMOS_EXEC_ENFORCE_SIGNATURES=true`, Mục 6 Bước 0).
+
+### AutoCreateAccount để làm gì
+
+Nó **tự tạo một `BaseAccount`** cho bất kỳ địa chỉ người ký nào **chưa tồn tại** trong state, ngay tại giao dịch ký đầu tiên. Cơ chế (`AnteHandle`):
+
+1. Lấy danh sách chữ ký của tx (`GetSignaturesV2`), với mỗi chữ ký suy ra địa chỉ từ pubkey (`sdk.AccAddress(sig.PubKey.Address())`).
+2. Nếu `!ak.HasAccount(ctx, addr)` → `NewAccountWithAddress` rồi `SetAccount` để ghi account vào state.
+3. Gọi tiếp decorator kế (`SetPubKey`, `SigVerification`…) — giờ chúng đã có bản ghi account để đọc/ghi.
+
+Mục đích: **bỏ bước onboarding**. Một khoá hoàn toàn mới có thể gửi tx ký đầu tiên (ví dụ `store code`) mà **không cần nhận token / không cần xin faucet trước**. Chính hành động ký tx đầu tiên là cái "đăng ký" tài khoản. Kết hợp với mặc định 0-fee, người dùng deploy hợp đồng ngay với một ví trắng tinh — đúng tinh thần permissionless.
+
+### Nếu KHÔNG có AutoCreateAccount thì luồng bình thường ra sao
+
+Đây là **hành vi Cosmos SDK chuẩn**: một địa chỉ phải **tồn tại trong state trước** thì mới ký tx được. Account chỉ được tạo khi nó **nhận token lần đầu** (qua genesis, hoặc một `MsgSend` gửi đến nó). Lý do: `SetPubKeyDecorator` và `SigVerificationDecorator` cần một bản ghi account sẵn có để lưu pubkey và đọc/đối chiếu `sequence`.
+
+Hệ quả khi thiếu AutoCreate, với một địa chỉ mới chưa từng nhận token:
+
+```
+account <addr> does not exist: unknown address
+```
+
+→ tx ký đầu tiên **bị từ chối ngay ở ante**, dù chữ ký hoàn toàn hợp lệ. Đây là vấn đề "con gà — quả trứng": muốn ký tx thì phải có account, mà muốn có account thì phải nhận một khoản chuyển vào trước.
+
+Luồng bình thường (không AutoCreate) buộc phải đi vòng:
+
+```
+1. Địa chỉ mới (chưa tồn tại trong state) — chưa ký được gì
+2. Một bên KHÁC gửi token vào (faucet / ví khác) qua MsgSend
+       → bank tạo BaseAccount cho địa chỉ đó (số account number được cấp)
+3. Từ giờ địa chỉ mới ký tx được (sequence bắt đầu từ 0)
+```
+
+### Quan hệ với faucet (Mục 6b)
+
+Hai cơ chế giải quyết hai việc khác nhau và bù cho nhau:
+
+- **AutoCreate** giải quyết phần *tồn tại account* — cho phép ký tx đầu mà không cần ai chạm vào trước. Nhưng account vẫn **số dư 0**, nên khi đã bật fee > 0 (Mục 6), tx đầu vẫn fail `insufficient funds` — AutoCreate **không** cấp vốn.
+- **Faucet** giải quyết phần *vốn* — `MsgSend` từ treasury vào địa chỉ. Bản thân `MsgSend` đến địa chỉ mới **cũng tự tạo account** (như luồng "bình thường" ở trên), nên ở chế độ có-fee thì faucet khôi phục được trải nghiệm "tx đầu chạy được" **mà không phụ thuộc AutoCreate** (xem ghi chú trong Mục 6b: "Khôi phục… mà không cần dựa AutoCreate").
+
+Tóm lại: ở **chế độ 0-fee** (mặc định dev), AutoCreate là đủ để onboarding 0 bước. Ở **chế độ có-fee**, phải có faucet để cấp vốn; AutoCreate khi đó chỉ còn là tiện ích phụ (account nào ký mà chưa tồn tại thì được tạo, nhưng vẫn cần token để qua được bước trừ phí).
+
+---
+
+<a id="muc-7"></a>
 ## 7. Checklist khi đưa lên production có fee
 
 - [ ] **Bước 0**: set `COSMOS_EXEC_ENFORCE_SIGNATURES=true` (không có thì ante không chạy → fee không enforce được).
@@ -663,6 +822,7 @@ Treasury có thể là EOA, multisig, hay địa chỉ contract CosmWasm — cha
 
 ---
 
+<a id="muc-8"></a>
 ## 8. Kết luận
 
 - **Throughput thực tế + LazyMode**: tổng chi phí (đã gồm hóa đơn Celestia của operator) **thấp hơn đáng kể** so với tự dựng Cosmos chain thường, vì bạn xóa hẳn "thuế bảo mật" dạng lạm phát + N× hạ tầng validator, thay bằng DA dùng chung.
@@ -672,6 +832,7 @@ Treasury có thể là EOA, multisig, hay địa chỉ contract CosmWasm — cha
 
 ---
 
+<a id="tham-chieu-code"></a>
 ## Tham chiếu code
 
 | Thành phần | File |

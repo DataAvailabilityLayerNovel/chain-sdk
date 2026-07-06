@@ -15,7 +15,7 @@ import (
 )
 
 func TestDefaultGenesisContainsCriticalModules(t *testing.T) {
-	application := New(log.NewNopLogger(), dbm.NewMemDB())
+	application := New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir())
 
 	var genesis map[string]json.RawMessage
 	if err := json.Unmarshal(application.DefaultGenesis(), &genesis); err != nil {
@@ -38,7 +38,7 @@ func TestDefaultGenesisContainsCriticalModules(t *testing.T) {
 }
 
 func TestAppLifecycleSmoke(t *testing.T) {
-	application := New(log.NewNopLogger(), dbm.NewMemDB())
+	application := New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir())
 
 	if application.IBCKeeper == nil {
 		t.Fatal("ibc keeper is nil")

@@ -90,6 +90,22 @@ POST /exec/prune     {"height": N}     → {"status": "ok"}
 
 **File:** [`apps/cosmos-exec/cmd/cosmos-exec-grpc/main.go`](../../../cmd/cosmos-exec-grpc/main.go)
 
+> **Tại sao cần phần này?** Ngoài 6 core method (đủ để chạy block bình thường), 3
+> interface này lo **khôi phục sau sự cố + vận hành dài hạn**:
+> - **HeightProvider** (`GetLatestHeight`) — sau crash/restart, ev-node so height của
+>   nó với height execution để **phát hiện lệch**.
+> - **Rollbackable** (`Rollback`) — khi execution đã commit block > consensus (vd EL ở
+>   10, consensus mới thấy 8) → **lùi state về khớp**. cosmos-exec làm được vì IAVL có versioning.
+> - **ExecPruner** (`PruneExec`) — **dọn metadata cũ** (tx result, block info) theo height
+>   để node chạy lâu không phình đĩa.
+>
+> **Kế thừa hay tự tạo?** Cả 3 **interface do ev-node core định nghĩa sẵn** trong
+> [`core/execution/execution.go`](../../../../../core/execution/execution.go), và đều là
+> **TUỲ CHỌN** — ev-node dùng Go type assertion lúc chạy (`exec.(HeightProvider)`…), không
+> implement cũng không sao. Phần **bạn tự làm** ở cosmos-exec là: (1) **implement** thân
+> hàm, và (2) **expose qua HTTP tay** — vì 3 method này **không** nằm trong proto
+> `ExecutorService` nên connect-RPC không sinh sẵn như 6 core method ở trên.
+
 ---
 
 ## 2. Transaction Lifecycle
@@ -379,6 +395,56 @@ ProduceBlock(ctx):
   └─ 14. METRICS UPDATE
          height, txs_per_block, block_size, ...
 ```
+
+#### Bước 1 chi tiết: Raft quorum & chống split-brain
+
+**Bối cảnh.** ev-node chạy được ở chế độ **HA (high availability)**: nhiều instance
+sequencer trong một **cụm Raft**, đúng **một node là leader** sản xuất block, các node
+còn lại replicate để **sẵn sàng takeover** (bước 11). Raft là giao thức đồng thuận lo
+**bầu leader + nhân bản log**.
+
+**Quorum = đa số** (`⌊N/2⌋ + 1`) node trong cụm còn liên lạc được. Trước khi produce
+block, leader **phải xác nhận nó vẫn giữ được liên lạc với đa số**:
+
+```go
+// block/internal/executing/executor.go — ProduceBlock()
+// Check raft cluster health before producing block - ensures quorum is available
+if e.raftNode != nil && !e.raftNode.HasQuorum() {
+    return errors.New("raft cluster does not have quorum")
+}
+```
+
+- `e.raftNode != nil` → **chỉ chạy khi bật HA**. Deploy một node (không Raft) thì
+  `raftNode == nil`, bỏ qua toàn bộ check này.
+- `!HasQuorum()` → không đủ quorum thì **trả lỗi ngay, không produce** (skip block).
+
+**`HasQuorum()` kiểm gì** ([pkg/raft/node.go](../../../../../pkg/raft/node.go)):
+
+```go
+func (n *Node) HasQuorum() bool {
+    if n == nil || n.raft == nil {
+        return false
+    }
+    if n.raft.State() != raft.Leader {   // (1) không phải leader → không được produce
+        return false
+    }
+    // (2) Barrier buộc leader áp dụng hết log VÀ xác nhận vẫn được quorum công nhận.
+    //     Contact được đa số peer → future.Error()==nil; bị cô lập → lỗi.
+    future := n.raft.Barrier(n.config.SendTimeout)
+    return future.Error() == nil
+}
+```
+
+**Vì sao cần — chống split-brain.** Giả sử mạng chia đôi (network partition): leader cũ
+bị tách khỏi đa số. Nếu nó **cứ produce**, trong khi phía đa số **bầu leader mới** cũng
+produce → **hai chuỗi phân kỳ** (double-sign, fork). Check quorum mỗi block khiến leader
+bị cô lập **tự dừng** (không còn Barrier được với đa số) → chỉ phía nắm quorum mới ra
+block → không split-brain.
+
+> Dùng `Barrier` (không phải chỉ `VerifyLeader`) là chủ ý: nó vừa xác minh liên lạc quorum,
+> vừa đảm bảo leader đã **apply hết log** trước khi ký block mới — tránh produce trên state cũ.
+> Đây là **check liveness/an toàn**, khác với `IsLeader()` (chỉ đọc trạng thái cục bộ, không
+> chạm mạng).
 
 ### 4.3. CreateBlock — Cấu trúc block
 

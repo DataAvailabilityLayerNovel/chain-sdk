@@ -536,6 +536,27 @@ func (nm *nodeManager) patchGenesisForcedInclusion(path string) error {
 
 	gen["da_epoch_forced_inclusion"] = nm.cfg.daForcedInclusionEpoch
 
+	// Seed da_start_height to the live DA head on EVERY start, so each (clean)
+	// run scans forced inclusion from the current DA tip. This skips orphaned
+	// forced-inclusion blobs left in the namespace by earlier runs — without it,
+	// a freshly-restarted chain inherits those blobs as obligations in its first
+	// epoch, the sequencer boots too late to include them, and the full node
+	// halts the chain ("sequencer is malicious"). A start height of 0 would also
+	// make the retriever query DA height 0, which Celestia rejects ("height is
+	// equal to 0") every epoch. If the head query fails, keep any existing value
+	// (or fall back to 1): correct, just slower to catch up.
+	startHeight := uint64(1)
+	if cur, ok := gen["da_start_height"].(float64); ok && cur > 0 {
+		startHeight = uint64(cur)
+	}
+	if head, err := nm.daNetworkHead(); err != nil {
+		log.Printf("WARN could not query DA head, keeping da_start_height=%d (slower catchup): %v", startHeight, err)
+	} else if head > 0 {
+		startHeight = head
+	}
+	gen["da_start_height"] = startHeight
+	log.Printf("Set da_start_height=%d in genesis (DA head)", startHeight)
+
 	out, err := json.MarshalIndent(gen, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal genesis: %w", err)
@@ -833,6 +854,58 @@ func (nm *nodeManager) preflightDA() error {
 
 	log.Printf("DA preflight OK: endpoint=%s", nm.cfg.daAddress)
 	return nil
+}
+
+// daNetworkHead returns the current head height of the DA chain via the
+// `header.NetworkHead` JSON-RPC method (same endpoint/auth as preflightDA).
+// evnode reads the head the same way (block/internal/da/client.go NetworkHead).
+// Used to seed da_start_height so the node starts scanning from the live head
+// instead of DA height 0/1.
+func (nm *nodeManager) daNetworkHead() (uint64, error) {
+	payload := `{"jsonrpc":"2.0","id":1,"method":"header.NetworkHead","params":[]}`
+	req, err := http.NewRequestWithContext(nm.ctx, http.MethodPost, nm.cfg.daAddress, strings.NewReader(payload))
+	if err != nil {
+		return 0, fmt.Errorf("build NetworkHead request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(nm.cfg.daAuthToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+nm.cfg.daAuthToken)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("NetworkHead request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode >= 400 {
+		return 0, fmt.Errorf("NetworkHead failed status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	// ExtendedHeader: { "result": { "header": { "height": "12345" } } }
+	var parsed struct {
+		Result struct {
+			Header struct {
+				Height string `json:"height"`
+			} `json:"header"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0, fmt.Errorf("decode NetworkHead response: %w", err)
+	}
+	if parsed.Error != nil {
+		return 0, fmt.Errorf("NetworkHead rpc error: %s", parsed.Error.Message)
+	}
+	height, err := strconv.ParseUint(parsed.Result.Header.Height, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse NetworkHead height %q: %w", parsed.Result.Header.Height, err)
+	}
+	return height, nil
 }
 
 func (nm *nodeManager) startProcess(name string, cmd *exec.Cmd) error {

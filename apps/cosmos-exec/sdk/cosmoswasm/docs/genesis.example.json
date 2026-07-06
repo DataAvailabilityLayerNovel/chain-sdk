@@ -1,0 +1,8 @@
+{
+  "chain_id": "cosmos-wasm-devnet",
+  "start_time": "2026-06-28T00:00:00Z",
+  "initial_height": 1,
+  "proposer_address": "REPLACE_WITH_BASE64_OF_SEQUENCER_PUBKEY",
+  "da_start_height": 692000,
+  "da_epoch_forced_inclusion": 50
+}

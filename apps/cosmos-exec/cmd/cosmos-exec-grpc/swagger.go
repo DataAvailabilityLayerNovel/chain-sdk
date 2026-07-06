@@ -34,7 +34,6 @@ func swaggerSpec() map[string]any {
 			{"name": "node", "description": "Node status and block info"},
 			{"name": "tx", "description": "Transaction submission and result polling"},
 			{"name": "wasm", "description": "CosmWasm smart contract queries"},
-			{"name": "blob", "description": "Blob-first data storage (off-chain data, on-chain commitment)"},
 		},
 		"paths": map[string]any{
 			// ── NODE ────────────────────────────────────────────────
@@ -137,6 +136,19 @@ func swaggerSpec() map[string]any {
 				},
 			},
 
+			"/tx/simulate": map[string]any{
+				"post": map[string]any{
+					"tags":        []string{"tx"},
+					"summary":     "Simulate a tx to measure real gas",
+					"description": "Runs the tx through ante + message handlers WITHOUT committing, returning the real gas it consumes plus a suggested gas_limit (gas_used × COSMOS_EXEC_GAS_ADJUSTMENT) and the fee that gas_limit implies. Call before signing so the fee tracks the actual tx.",
+					"requestBody": reqBody("application/json", ref("SubmitTxRequest")),
+					"responses": map[string]any{
+						"200": resp("Simulation result", ref("SimulateResponse")),
+						"400": resp("Invalid request or tx", ref("ErrorResponse")),
+					},
+				},
+			},
+
 			// ── WASM ────────────────────────────────────────────────
 			"/wasm/query-smart": map[string]any{
 				"post": map[string]any{
@@ -182,6 +194,10 @@ func schemas() map[string]any {
 			prop("time", "string", "Block timestamp (RFC3339)"),
 			prop("app_hash", "string", "Application state hash after this block (hex)"),
 			prop("num_txs", "integer", "Number of transactions in this block"),
+			map[string]any{"tx_hashes": map[string]any{
+				"type": "array", "description": "Transaction hashes contained in this block",
+				"items": map[string]any{"type": "string"},
+			}},
 		),
 		"TxPendingResponse": obj(
 			prop("pending_count", "integer", "Number of transactions in the mempool"),
@@ -261,6 +277,17 @@ func schemas() map[string]any {
 			prop("da_price_per_byte", "string", "Policy constant: TIA per byte"),
 			prop("min_gas_price", "string", "Policy constant: gas-denom per gas unit"),
 		),
+		"SimulateResponse": obj(
+			prop("gas_used", "integer", "Real gas consumed when running the tx (no commit)"),
+			prop("gas_wanted", "integer", "Gas requested by the tx"),
+			prop("gas_limit", "integer", "Suggested gas_limit = ceil(gas_used × COSMOS_EXEC_GAS_ADJUSTMENT)"),
+			map[string]any{"fee": map[string]any{
+				"type": "array", "description": "Suggested fee as coins ([{denom, amount}]) for gas_limit",
+				"items": map[string]any{"type": "object"},
+			}},
+			prop("fee_denom", "string", "Denomination of the suggested fee"),
+			prop("fee_amount", "string", "Suggested fee amount (integer string) for gas_limit"),
+		),
 
 		// ── WASM ────────────────────────────────────────────────
 		"QuerySmartRequest": obj(
@@ -275,42 +302,10 @@ func schemas() map[string]any {
 			),
 		},
 
-		// ── BLOB ────────────────────────────────────────────────
-		"BlobSubmitRequest": obj(
-			prop("data_base64", "string", "Raw data encoded as base64"),
-		),
-		"BlobSubmitResponse": obj(
-			prop("commitment", "string", "SHA-256 commitment (hex) — store this on-chain"),
-			prop("size", "integer", "Stored data size in bytes"),
-		),
-		"BlobRetrieveResponse": obj(
-			prop("commitment", "string", "SHA-256 commitment (hex)"),
-			prop("data_base64", "string", "Blob data encoded as base64"),
-			prop("size", "integer", "Data size in bytes"),
-		),
-		"BlobBatchRequest": map[string]any{
-			"type": "object",
-			"required": []string{"blobs_base64"},
-			"properties": map[string]any{
-				"blobs_base64": map[string]any{
-					"type":        "array",
-					"description": "Array of base64-encoded blobs",
-					"items":       map[string]any{"type": "string"},
-				},
-			},
-		},
-		"BlobBatchResponse": map[string]any{
-			"type": "object",
-			"properties": mergeProps(
-				prop("root", "string", "Merkle root of the batch (hex) — commit this on-chain"),
-				prop("count", "integer", "Number of blobs in the batch"),
-				map[string]any{"commitments": map[string]any{
-					"type":        "array",
-					"description": "Per-blob SHA-256 commitments",
-					"items":       map[string]any{"type": "string"},
-				}},
-			),
-		},
+		// NOTE: blob-first data (large off-chain data on Celestia DA) is NOT served
+		// by cosmos-exec-grpc — the SDK's BlobClient talks to a Celestia bridge
+		// directly. Chỉ commitment được ghi on-chain qua /tx/submit (CosmWasm
+		// execute "record_blob"), nên ở đây không có path/schema blob.
 	}
 }
 

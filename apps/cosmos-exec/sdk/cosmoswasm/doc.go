@@ -19,6 +19,12 @@ const (
 	txResultPath   = "/tx/result"
 	statusPath     = "/status"
 	querySmartPath = "/wasm/query-smart"
+	// Endpoint dev-facing bọc thêm (xem client_extra.go).
+	txSimulatePath   = "/tx/simulate"
+	txEstimatePath   = "/tx/estimate"
+	txPendingPath    = "/tx/pending"
+	blocksLatestPath = "/blocks/latest"
+	blocksPathPrefix = "/blocks/" // + {height}
 )
 
 // Client wraps the public HTTP endpoints exposed by cosmos-exec-grpc:
@@ -26,6 +32,11 @@ const (
 //   - GET  /tx/result
 //   - GET  /status            (node finality: latest vs finalized height)
 //   - POST /wasm/query-smart
+//   - GET  /auth/account/{address}
+//   - POST /tx/simulate       (gas thật để ký — xem client_extra.go)
+//   - POST /tx/estimate       (ước lượng chi phí DA + gas)
+//   - GET  /blocks/latest, /blocks/{height}
+//   - GET  /tx/pending
 //
 // Blob-first data (large off-chain data on Celestia DA) is handled by the
 // separate [BlobClient], which talks to a Celestia bridge directly — not

@@ -90,7 +90,41 @@ riêng thư mục `apps/cosmos-wasm`.
 
 ---
 
-## 4. evcosmos được tạo ra như thế nào
+## 4. Tại sao cần binary riêng, không dùng thẳng code ev-node?
+
+Câu hỏi thường gặp: "ev-node đã có sẵn logic block/P2P/DA rồi, sao không chạy luôn
+mà phải tạo `evcosmos`?". Lý do: **ev-node là framework (thư viện), không phải
+ứng dụng chạy sẵn.**
+
+Các package lõi ([block/](../../../../../block/), [pkg/p2p/](../../../../../pkg/p2p/),
+[pkg/sequencers/](../../../../../pkg/sequencers/), `node/`, `pkg/da/`) cung cấp
+*khả năng*, nhưng bản thân chúng **không biết** những lựa chọn riêng của rollup:
+
+- Chuỗi này dùng **executor** nào (CosmWasm? EVM? app tự viết?)
+- Dùng **sequencer** nào (`single` hay `based`)
+- Genesis, chain-id, signer key, store path lấy ở đâu
+- Kết nối tới **DA** nào, executor gRPC ở URL nào
+
+Phải có một chỗ *lắp ráp và cấu hình* các mảnh đó lại thành một chương trình chạy
+được — đó chính là `evcosmos`. Nhìn lại mục 3: `apps/cosmos-wasm` **không cài đặt
+lại** tầng đồng thuận, nó chỉ *gọi vào* code ev-node với cấu hình cụ thể. Nói cách
+khác, "dùng thẳng code ev-node" và "tạo binary evcosmos" không mâu thuẫn — evcosmos
+**chính là** cách dùng code ev-node cho rollup Cosmos/WASM.
+
+**Ví dụ dễ hình dung:** ev-node giống thư viện `net/http` của Go. Không ai "chạy
+`net/http`" được; phải viết một `main.go` khởi tạo server, đăng ký handler, chọn
+port. `evcosmos` đúng là cái `main.go` đó cho rollup này.
+
+**Vì sao là binary tách riêng, không nhét vào ev-node?** Vì mỗi rollup là một *cấu
+hình khác nhau* của cùng bộ core. ev-node là repo đa-module: mỗi app có `go.mod`
+riêng và là một entrypoint riêng ([apps/testapp](../../../../testapp/),
+[apps/cosmos-wasm](../../../../cosmos-wasm/), ...). Cùng một core → nhiều binary,
+mỗi binary chọn executor/sequencer/DA của nó. Đây cũng là hệ quả trực tiếp của
+kiến trúc tách tầng ở mục 1 và mục 5.
+
+---
+
+## 5. evcosmos được tạo ra như thế nào
 
 ### Cách 1 — qua `just` (chuẩn)
 
@@ -139,7 +173,7 @@ Từ [main.go](../../../../cosmos-wasm/main.go):
 
 ---
 
-## 5. Quan hệ với cosmos-exec (kiến trúc hai binary)
+## 6. Quan hệ với cosmos-exec (kiến trúc hai binary)
 
 ```
 ┌──────────────┐      HTTP/JSON      ┌──────────────────┐     gRPC      ┌──────────────────────────┐
@@ -164,7 +198,7 @@ sau) mà không đụng tầng đồng thuận, và ngược lại.
 
 ---
 
-## 6. Dùng để làm gì
+## 7. Dùng để làm gì
 
 `evcosmos` là **điểm vào để khởi động một rollup hoàn chỉnh**. Trong bộ sản phẩm
 của đồ án (`my-dapp-web` → `cosmos-exec` → `evcosmos`), nó là khối đáy biến chuỗi
@@ -173,7 +207,7 @@ bộ giữa các node.
 
 ---
 
-## 7. Nếu không có evcosmos thì sao
+## 8. Nếu không có evcosmos thì sao
 
 | Thiếu thành phần        | Hệ quả                                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
@@ -191,7 +225,7 @@ Khi thiếu evcosmos, hệ thống chỉ còn `cosmos-exec` chạy state CosmWas
 
 ---
 
-## 8. Tham chiếu nhanh
+## 9. Tham chiếu nhanh
 
 - Source: [apps/cosmos-wasm/](../../../../cosmos-wasm/)
 - Build recipe: [.just/build.just](../../../../../.just/build.just)

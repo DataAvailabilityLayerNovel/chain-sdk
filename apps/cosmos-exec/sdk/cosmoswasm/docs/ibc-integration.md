@@ -6,6 +6,62 @@ Tài liệu này mô tả chi tiết về IBC (Inter-Blockchain Communication) t
 
 ---
 
+## 0. ev-node có dùng được IBC không?
+
+**Trả lời ngắn: được về mặt nguyên lý, nhưng chưa "cắm là chạy".** Một sovereign
+rollup như ev-node vẫn là một chain Cosmos SDK đầy đủ, nên **mọi mảnh phần mềm của
+IBC đều dùng được** và trong cosmos-exec đã **wire sẵn cả 4 lớp** (capability, IBC
+core, transfer/ICS-20, và WasmKeeper có khả năng IBC — xem §2). Contract CosmWasm
+cũng có thể mở channel và gửi/nhận packet. Cái **chưa xong** không nằm ở "IBC có
+chạy trên Cosmos SDK không" (có), mà ở **chỗ tiếp giáp giữa mô hình rollup và mô
+hình light client của IBC**.
+
+Cụ thể, ba rào cản khiến nó chưa dùng được ngay (chi tiết ở §3, §7):
+
+1. **Mô hình tin cậy lệch nhau.** IBC light client chuẩn `07-tendermint` kỳ vọng
+   counterparty có **một tập validator** ký block. Rollup chỉ có **một sequencer**,
+   và "finality" thật sự đến từ việc block **đã lên DA (Celestia)**, không phải từ
+   chữ ký validator set. Hiện cosmos-exec đi đường tắt (**Approach A**): *trình bày
+   rollup như một Tendermint chain 1-validator* để 07-tendermint chấp nhận — chạy
+   được nhưng **counterparty phải tin hoàn toàn vào sequencer key**, và **bỏ qua**
+   bằng chứng DA.
+
+2. **Thiếu RPC kiểu Tendermint.** Relayer (Hermes, rly) nói chuyện qua **Tendermint
+   RPC/WebSocket**, còn cosmos-exec chỉ phơi **REST/HTTP**. Nên cần một **adapter
+   RPC** hoặc dùng chế độ polling của relayer (§4.6, §7).
+
+3. **Vài chỗ còn stub.** `GetHistoricalInfo` trả rỗng và `UnbondingTime` hard-code
+   24h (§3.2) → light client **không skip-verify được**, buộc relayer phải update
+   đều và rollup phải **sản block đều** (kể cả block rỗng) kẻo client hết hạn.
+
+Nói cách khác: **phần mềm IBC đã sẵn; thứ còn thiếu là một light client hiểu được
+"header của rollup" một cách trustless.** Cách làm đúng chuẩn cho rollup là dùng
+**08-wasm light client** (Approach B) verify *chữ ký sequencer + bằng chứng DA
+inclusion* — xem §7.1.
+
+> **Làm rõ (tránh nói nhầm tại hội đồng):**
+> - **IBC không thuộc lõi ev-node.** ev-node là khung *execution-agnostic* — nó chỉ
+>   lo sắp thứ tự, sản xuất block, P2P và DA. **IBC nằm ở tầng ứng dụng** (thư viện
+>   `ibc-go` trong Cosmos SDK app), tức là ở **tầng thực thi mà đồ án dựng**, không
+>   phải thứ ev-node cung cấp. Nên câu hỏi đúng là *"app Cosmos SDK trên ev-node có
+>   dùng được IBC không"* — và câu trả lời là có (về nguyên lý), do chính đồ án wire.
+> - **ev-node có "light client" — nhưng là loại khác.** ev-node/Celestia có
+>   **light node cho DA** (light node lấy mẫu để kiểm tra dữ liệu sẵn có — data
+>   availability sampling). Đây **không phải IBC light client**. IBC light client
+>   (07-tendermint / 08-wasm) là một object *on-chain trong tầng ứng dụng* dùng để
+>   verify header của **chain đối phương** — ev-node **không** ship sẵn cái này cho
+>   mô hình rollup; muốn trustless phải tự viết 08-wasm (§7.1). Hai khái niệm trùng
+>   tên "light client" nhưng khác tầng, khác việc.
+> - **Vì sao đồ án chủ động không dùng IBC.** (1) **Ngoài phạm vi đề tài** — trọng
+>   tâm là *tầng thực thi CosmWasm + blob-first*, không phải liên chuỗi; (2) để
+>   *trustless thật* phải làm thêm hai phần nặng (08-wasm light client + adapter RPC
+>   kiểu Tendermint cho relayer), vượt khối lượng đồ án; (3) **use case không cần** —
+>   app-chain/blob-first của đồ án tự vận hành, không phụ thuộc chuyển tài sản xuyên
+>   chain như một tính năng lõi. Vì vậy đồ án **wire sẵn (scaffold) để mở đường**
+>   nhưng **cố ý dừng ở đó**, coi IBC trustless là hướng phát triển.
+
+---
+
 ## 1. IBC là gì và tại sao một sovereign rollup cần nó
 
 ### 1.1 Bài toán
@@ -344,6 +400,177 @@ Relayer chi token để submit `MsgUpdateClient`, `MsgRecvPacket`, ... Nếu rol
 | [`app/wasm_deps.go`](../../../app/wasm_deps.go)              | Stub staking/upgrade keepers cho IBC client   |
 | [`app/ante.go`](../../../app/ante.go)                        | Ante chain — relayer tx đi qua đây            |
 | `executor/executor.go`                                       | Endpoint `/tx/submit` mà relayer dùng         |
+
+---
+
+## 9. Dùng ev-abci thì IBC thế nào? Và vì sao vẫn cần 08-wasm + relayer
+
+### 9.1 ev-abci gỡ 2/3 rào cản
+
+ev-abci là con đường **thay chỗ CometBFT** và tái tạo gần đủ bề mặt CometBFT. Mà
+hai thứ IBC cần ở counterparty lại **chính là** hai thứ ev-abci dựng lại sẵn:
+
+| Rào cản IBC | Đường **cắm thẳng** (đồ án — cosmos-exec, REST) | Đường **ev-abci** |
+| --- | --- | --- |
+| Relayer cần **Tendermint RPC** (WebSocket + `block`/`tx`/`validators`/`status`) | ❌ chỉ REST → phải tự viết adapter (§7) | ✅ **có sẵn RPC tương thích CometBFT** → Hermes nối thẳng |
+| Header khớp **`07-tendermint`** (block/commit/chữ ký kiểu CometBFT) | ⚠️ partial → tự lo định dạng | ✅ **sinh header + commit + chữ ký kiểu CometBFT** (sequencer đóng vai validator) |
+| **Mô hình tin cậy** (1 sequencer, finality từ DA) | ❌ vẫn tin sequencer | ❌ **vẫn tin sequencer** — ev-abci không giải cái này |
+
+Kết luận: **dùng ev-abci thì IBC 07-tendermint chạy được gần như out-of-the-box ở
+Approach A** (tin sequencer), vì nó có sẵn RPC cho relayer và header đúng định dạng.
+Đường cắm thẳng của đồ án đánh đổi đúng phần đó để nhẹ và nhanh hơn — muốn IBC thì
+phải tự bù adapter. **Nhưng cả hai đường đều KHÔNG trustless** cho tới khi có
+**08-wasm light client** — vì đó là bản chất của mô hình single-sequencer rollup,
+không phải do adapter.
+
+### 9.2 Vì sao BẮT BUỘC phải viết 08-wasm light client (nếu muốn trustless)
+
+**Light client trong IBC là gì.** Là một **object on-chain nằm bên counterparty**,
+đại diện cho rollup, có nhiệm vụ **verify header của rollup** trước khi chấp nhận
+bất kỳ packet nào. Nó là "safety" của IBC: chỉ khi header được light client verify
+đậu thì packet mới được tin.
+
+**Vì sao `07-tendermint` (Approach A) chưa đủ.** LC 07-tendermint chỉ kiểm **một
+thứ**: header có được **validator set ký đúng** không. Với rollup, "validator set"
+= **đúng một sequencer**. Nên 07-tendermint chỉ trả lời được *"sequencer có ký cái
+header này không"* — mà **không** trả lời được *"block này có thật sự được công bố
+lên DA (Celestia) chưa"*. Hệ quả: nếu sequencer ký một header cho block **chưa từng
+lên DA** hoặc **state sai**, 07-tendermint **không có cách nào từ chối**. Tức là
+counterparty **tin sequencer hoàn toàn** — cả về thứ tự lẫn tính khả dụng/đúng đắn.
+
+**08-wasm giải quyết bằng cách nào.** `08-wasm` **không phải một light client cụ
+thể** — nó là một **khung cho phép nạp một light client viết bằng WASM** (Rust →
+WASM) lên counterparty. Nghĩa là bạn **tự viết logic verify** đúng theo mô hình
+ev-node + Celestia, rồi upload. LC 08-wasm cho rollup cần verify **hai lớp**:
+
+1. **Chữ ký sequencer** trên header (giống 07-tendermint).
+2. **Bằng chứng DA inclusion** — chứng minh dữ liệu của block đã **thật sự được
+   công bố lên Celestia** ở một height nhất định (proof theo namespace đối chiếu
+   với data root của Celestia — thường lấy data root đó qua **Blobstream**, cầu
+   đưa data root Celestia sang chain đối phương).
+
+Nhờ lớp (2), counterparty **chỉ chấp nhận header khi dữ liệu chứng minh được là sẵn
+có trên DA** → không còn tin mù vào việc sequencer trung thực về tính khả dụng. Đây
+mới là **trustless thật** cho rollup.
+
+**Vì sao phải là BẠN viết.** `ibc-go` ship sẵn 07-tendermint (cho chain CometBFT),
+nhưng **không** ship LC hiểu mô hình rollup + Celestia. 08-wasm chạy *bất kỳ* LC
+nào bạn nạp, nhưng **bạn phải viết cái LC đó** — logic verify chữ ký sequencer +
+DA proof là **đặc thù ev-node + Celestia**, chưa có bản drop-in.
+
+**Các bước triển khai 08-wasm (chi tiết):**
+1. **Viết LC (Rust):** parse `SignedHeader` của ev-node → verify chữ ký sequencer →
+   verify DA inclusion proof (namespace proof so với Celestia data root / Blobstream).
+2. **`MsgStoreCode`** lên module `08-wasm` của counterparty → nhận về một **code hash**.
+3. **`MsgCreateClient`** với `client_type = "08-wasm"`, trỏ tới code hash + initial
+   `ClientState`/`ConsensusState` của rollup.
+4. **Connection / channel / packet handshake KHÔNG đổi** — chúng không quan tâm LC
+   bên dưới là loại gì (xem §4.3–4.5). Chỉ **lớp Client** thay, các lớp trên tái dùng.
+
+> **Quan trọng — ev-abci KHÔNG thay được bước này.** ev-abci làm rollup *trông
+> giống* Tendermint để 07-tendermint chấp nhận (trust level A). Nhưng để **verify
+> DA** thì vẫn phải có LC tùy biến (08-wasm), **bất kể** đi ev-abci hay cắm thẳng —
+> vì DA-verification là logic của mô hình rollup, không phải thứ adapter cung cấp.
+
+### 9.3 Relayer — nó là gì, làm gì, tin cậy ra sao (chi tiết)
+
+**Là gì.** Relayer là **một tiến trình off-chain** — *không* phải smart contract,
+*không* nằm trên chain nào. **Permissionless**: ai chạy cũng được, chạy bao nhiêu
+cái cũng được. Nó là "người đưa thư" mang **packet + bằng chứng** qua lại giữa hai
+chain. Ví dụ: **Hermes** (Rust, Informal Systems), **rly** (Go).
+
+**Vì sao cần.** Hai chain IBC **không tự nói chuyện trực tiếp** với nhau. Chain A
+chỉ **commit packet vào state của chính nó**, không có cách nào tự đẩy sang chain B.
+Relayer đứng giữa: thấy packet trên A → lấy proof → nộp cho B.
+
+**Vòng đời một packet (relayer làm gì):**
+1. **Theo dõi** chain A, bắt sự kiện `send_packet`.
+2. **Truy vấn** A lấy packet + **merkle proof** cam kết packet + height của header.
+3. **`MsgUpdateClient`** lên B — cập nhật light client của A (nằm trên B) tới đúng
+   height chứa packet.
+4. **`MsgRecvPacket`** lên B kèm packet + proof → **light client trên B verify
+   proof** đối chiếu consensus state vừa update.
+5. B commit **acknowledgement** → relayer mang ack về A (`MsgAcknowledgement`).
+6. Nếu quá hạn không nhận → relayer gửi **`MsgTimeout`** để A hoàn tác (unescrow).
+
+**Tin cậy — vì sao relayer permissionless mà vẫn an toàn.** Relayer **không thể giả
+mạo gì cả**: tất cả những gì nó làm là *mang dữ liệu + proof*; việc **verify là do
+light client hai bên**. Relayer độc hại **chỉ có thể không chuyển (kiểm duyệt)**
+hoặc tốn gas vô ích — **không thể ăn cắp hay ngụy tạo**. Đây chính là lý do "ai cũng
+chạy relayer được".
+
+**Quan hệ relayer ↔ light client (điểm cốt lõi):** relayer lo **liveness** (đồ được
+chuyển đến), light client lo **safety** (không cái giả nào được chấp nhận). Relayer
+**feed** light client qua `MsgUpdateClient`; light client **verify** cái relayer
+mang tới. Tách bạch này là lý do IBC *trust-minimized*: **tin một relayer bất kỳ
+cho việc giao hàng, vì không cần tin nó cho tính đúng đắn.**
+
+**Trong ngữ cảnh đồ án:**
+- Relayer nối vào rollup qua RPC. **Cắm thẳng (đồ án) = chỉ REST** → cần adapter
+  hoặc polling mode. **ev-abci = CometBFT RPC** → Hermes nối thẳng (§9.1).
+- Relayer **phải `MsgUpdateClient` đều đặn** vì LC hiện tại không skip-verify được
+  (stub `GetHistoricalInfo` rỗng, §3.2) và trusting period 24h — rollup **gap >
+  24h** thì client hết hạn, phải governance reset (§6.2). → luôn **sản block rỗng**.
+- Relayer **cần token trả gas** trên cả hai chain (§6.6); ICS-29 để thưởng relayer
+  thì chưa wire.
+
+---
+
+## 10. Tóm tắt khi bị hỏi (cheat-sheet bảo vệ)
+
+**Hỏi: "ev-node / đồ án có dùng được IBC không?"**
+> *"Được về nguyên lý — rollup vẫn là chain Cosmos SDK nên toàn bộ phần mềm IBC
+> dùng được, và em đã wire sẵn cả 4 lớp (capability, IBC core, ICS-20 transfer,
+> WasmKeeper IBC). Nhưng chưa 'cắm là chạy' vì phần tiếp giáp giữa mô hình rollup
+> và light client của IBC còn thiếu — em để ở mức scaffold, chưa mainnet-ready."*
+
+**Hỏi: "Tại sao chưa dùng được ngay?"** — ba lý do, nói gọn:
+1. **Light client lệch mô hình tin cậy.** `07-tendermint` cần **một validator set**;
+   rollup chỉ có **một sequencer** và finality đến từ **DA (Celestia)**, không phải
+   chữ ký validator. Đường tắt hiện tại (Approach A) giả lập rollup như *Tendermint
+   1-validator* → chạy được nhưng **phải tin sequencer key** và bỏ qua bằng chứng DA.
+2. **Relayer cần Tendermint RPC**, còn cosmos-exec chỉ có **REST/HTTP** → cần adapter.
+3. **Còn stub** (`GetHistoricalInfo` rỗng, `UnbondingTime` cứng 24h) → không
+   skip-verify, buộc update client đều + sản block đều kẻo client hết hạn.
+
+**Hỏi: "Vậy cắm vào thế nào?"** — hai đường:
+- **Đường nhanh (Approach A, đã scaffold):** thêm **adapter RPC kiểu Tendermint**
+  cho relayer, đảm bảo header rollup ký khớp định dạng `07-tendermint`, rồi chạy
+  **Hermes** làm create-client → connection → channel handshake (§4). Bắt buộc
+  **sản block rỗng** để light client không hết trusting period. → Có IBC/ICS-20
+  ngay, đổi lại **tin sequencer** (tập trung).
+- **Đường chuẩn cho rollup (Approach B, khuyến nghị):** viết một **08-wasm light
+  client** (Rust) verify *chữ ký sequencer + DA inclusion proof*, deploy lên
+  counterparty, tạo client `client_type = "08-wasm"`; connection/channel/packet
+  giữ nguyên (§7.1). → **Trustless thật sự**, không phải tin sequencer. Đây là
+  hướng mà Polymer, Composable, Union… đang làm cho rollup IBC.
+
+**Hỏi: "Nếu dùng ev-abci thì IBC có chạy được không?"**
+> *"Dễ hơn hẳn — ev-abci dựng lại bề mặt CometBFT nên có sẵn RPC cho relayer và
+> header kiểu Tendermint, IBC 07-tendermint chạy gần như ngay ở mức tin sequencer.
+> Đồ án em chọn cắm thẳng để nhẹ/nhanh nên đánh đổi đúng phần đó. Nhưng dù ev-abci
+> hay cắm thẳng, muốn IBC trustless đều phải tự viết 08-wasm light client verify DA
+> — đó là giới hạn của mô hình single-sequencer, không phải của adapter."*
+
+**Hỏi: "08-wasm là gì, relayer là gì?"** (một câu mỗi cái)
+> *"08-wasm là khung cho phép nạp một light client viết bằng WASM lên chain đối
+> phương — em phải tự viết nó để verify chữ ký sequencer **và** bằng chứng dữ liệu
+> đã lên Celestia, nhờ đó counterparty không phải tin mù sequencer. Relayer là tiến
+> trình off-chain permissionless mang packet + proof qua lại; nó không verify gì
+> (light client hai bên verify) nên không thể giả mạo, chỉ lo giao hàng."*
+
+**Hỏi mẹo: "IBC là của ev-node hay của đồ án? ev-node có light client không?"**
+> *"IBC không thuộc lõi ev-node — ev-node execution-agnostic, chỉ lo sequencing/DA.
+> IBC nằm ở `ibc-go` trong tầng ứng dụng, tức phần em dựng. ev-node có light node
+> nhưng là cho DA (data availability sampling), khác hoàn toàn IBC light client —
+> loại IBC (07-tendermint/08-wasm) phải wire ở tầng app, và cho rollup trustless thì
+> cần tự viết 08-wasm. Em chủ động không làm IBC vì ngoài phạm vi đề tài (trọng tâm
+> là thực thi + blob-first), tốn thêm 08-wasm LC + adapter RPC, và use case không
+> cần — nên em chỉ scaffold để mở đường."*
+
+**Câu chốt một dòng:** *"IBC phần mềm đã sẵn; thứ còn thiếu là một light client
+hiểu được header của rollup theo kiểu trustless — và đó là hướng phát triển, không
+phải giới hạn kiến trúc."*
 
 ---
 

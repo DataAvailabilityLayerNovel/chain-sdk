@@ -22,7 +22,7 @@ import (
 
 func TestCosmosExecutorLifecycle(t *testing.T) {
 	ctx := context.Background()
-	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 
 	stateRoot, err := exec.InitChain(ctx, time.Now(), 1, "cosmos-exec-local")
 	if err != nil {
@@ -71,7 +71,7 @@ func TestCosmosExecutorLifecycle(t *testing.T) {
 
 func TestCosmosExecutorValidation(t *testing.T) {
 	ctx := context.Background()
-	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 
 	stateRoot, err := exec.InitChain(ctx, time.Now(), 1, "cosmos-exec-local")
 	if err != nil {
@@ -89,7 +89,7 @@ func TestCosmosExecutorValidation(t *testing.T) {
 
 func TestCosmosExecutorFilterTxs(t *testing.T) {
 	ctx := context.Background()
-	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 
 	txs := [][]byte{
 		[]byte{0x01},
@@ -119,7 +119,7 @@ func TestCosmosExecutorFilterTxs(t *testing.T) {
 
 func TestCosmosExecutorExecuteTxsWasmLifecycle(t *testing.T) {
 	ctx := context.Background()
-	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB()))
+	exec := New(app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir()))
 
 	sender := sdk.AccAddress(bytes.Repeat([]byte{0x11}, 20))
 	newOwner := sdk.AccAddress(bytes.Repeat([]byte{0x22}, 20))

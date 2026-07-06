@@ -21,7 +21,7 @@ import (
 // and that InitChain accepts the patched genesis without error.
 func TestWithGenesisFundsTreasury(t *testing.T) {
 	ctx := context.Background()
-	application := app.New(log.NewNopLogger(), dbm.NewMemDB())
+	application := app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir())
 
 	treasury := sdk.AccAddress(bytes.Repeat([]byte{0x42}, 20))
 	want := sdk.NewCoins(sdk.NewInt64Coin("ustake", 1_000_000_000_000))
@@ -66,7 +66,7 @@ func TestWithGenesisFundsTreasury(t *testing.T) {
 // Without WithGenesis the bank genesis carries no balances (the zero-balance
 // default that makes the faucet mandatory once fees are enforced).
 func TestDefaultGenesisHasNoBalance(t *testing.T) {
-	application := app.New(log.NewNopLogger(), dbm.NewMemDB())
+	application := app.New(log.NewNopLogger(), dbm.NewMemDB(), t.TempDir())
 
 	var state map[string]json.RawMessage
 	if err := json.Unmarshal(application.DefaultGenesis(), &state); err != nil {
